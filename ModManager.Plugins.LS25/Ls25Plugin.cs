@@ -14,9 +14,9 @@ public sealed class Ls25Plugin : IGameModPlugin
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.ls25",
         DisplayName: "Landwirtschafts-Simulator 25",
-        Version: "0.3.0",
+        Version: "0.4.0",
         Author: "Kroste",
-        Description: "Mod-Manager für den Landwirtschafts-Simulator 25 (FS25) mit ModHub- und Hof-Hirschfeld-Katalog.");
+        Description: "Mod-Manager für den Landwirtschafts-Simulator 25 (FS25) mit ModHub-, Hof-Hirschfeld- und Modhoster-Katalog.");
 
     public IReadOnlyList<GameTarget> Targets { get; } = new[]
     {
@@ -31,6 +31,7 @@ public sealed class Ls25Plugin : IGameModPlugin
     private Ls25Paths? _paths;
     private ModHubService? _hub;
     private HofHirschfeldCatalogService? _hofHirschfeld;
+    private ModhosterCatalogService? _modhoster;
     private CatalogCache? _cache;
     private readonly Dictionary<string, ModInstallService> _installers = new();
     private readonly ModDescReader _reader = new();
@@ -43,6 +44,7 @@ public sealed class Ls25Plugin : IGameModPlugin
         _cache = new CatalogCache(_paths);
         _hub = new ModHubService(_paths, host.CreateHttpClient("modhub"));
         _hofHirschfeld = new HofHirschfeldCatalogService(host.CreateHttpClient("hofhirschfeld"));
+        _modhoster = new ModhosterCatalogService(host.CreateHttpClient("modhoster"));
 
         foreach (var game in activatedGames)
         {
@@ -61,12 +63,13 @@ public sealed class Ls25Plugin : IGameModPlugin
     public IEnumerable<IGameTabContribution> GetTabContributions(DetectedGame game)
     {
         if (!_installers.TryGetValue(game.Target.GameId, out var installer) || _host is null
-            || _hub is null || _cache is null || _hofHirschfeld is null)
+            || _hub is null || _cache is null || _hofHirschfeld is null || _modhoster is null)
             yield break;
 
         yield return new InstalledTab(installer, _host);
         yield return new ModHubTab(_hub, _cache, installer, _host);
         yield return new HofHirschfeldTab(_hofHirschfeld, _host);
+        yield return new ModhosterTab(_modhoster, _host);
         yield return new DownloadsTab(installer, _host);
     }
 
@@ -74,6 +77,7 @@ public sealed class Ls25Plugin : IGameModPlugin
     {
         _hub?.Dispose();
         _hofHirschfeld?.Dispose();
+        _modhoster?.Dispose();
         _host?.Logger.Info("LS25 shutdown");
         return Task.CompletedTask;
     }
@@ -123,6 +127,21 @@ public sealed class Ls25Plugin : IGameModPlugin
         public bool IsVisible(DetectedGame game) => true;
         public Control CreateView(DetectedGame game, IHostServices host) =>
             new HofHirschfeldView { DataContext = new HofHirschfeldViewModel(_service, _host) };
+    }
+
+    private sealed class ModhosterTab : IGameTabContribution
+    {
+        private readonly ModhosterCatalogService _service;
+        private readonly IHostServices _host;
+        public ModhosterTab(ModhosterCatalogService service, IHostServices host)
+        { _service = service; _host = host; }
+        public string Id => "modhoster";
+        public string Label => "modhoster";
+        public string Icon => "\U0001F310"; // 🌐
+        public int Order => 17;
+        public bool IsVisible(DetectedGame game) => true;
+        public Control CreateView(DetectedGame game, IHostServices host) =>
+            new ModhosterView { DataContext = new ModhosterViewModel(_service, _host) };
     }
 
     private sealed class DownloadsTab : IGameTabContribution

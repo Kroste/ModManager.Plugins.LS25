@@ -12,6 +12,17 @@
 
 ## Aktueller Stand
 
+**v0.4.0 (M3.4 — modhoster-Katalog):**
+- Fünfter Tab **modhoster** — nutzt den offiziellen JSON-Endpunkt
+  `/mods.json?game_id=1` (game_id=1 ist LS25) statt HTML-Scrape.
+- **Kein In-App-Download**: Login-Pflicht + robots.txt sperrt Download-
+  Endpunkte. Detail-Klick öffnet die Browser-Seite.
+- `ModhosterCatalogService` (190 Z., aus LS-ModManager mit HttpClient-
+  Injection adaptiert).
+- `ModhosterViewModel` + `ModhosterView`: Paginierung (statt Kategorien
+  wie bei Hof Hirschfeld), Live-Suche in Titel/Autor/Kategorie,
+  „Katalog neu laden", „Detail im Browser".
+
 **v0.3.0 (M3.3 — Hof-Hirschfeld-Katalog):**
 - Vierter Tab **Hof Hirschfeld** (Community-Umbauten für LS25). Iteriert
   über Kategorien-Slugs von der Startseite, parst Mod-Karten pro Kategorie.
@@ -61,8 +72,6 @@
 
 ## Roadmap
 
-- **v0.4** — modhoster.de-Katalog (Login-Pflicht: nur Detail-Link im Browser
-  öffnen, kein Auto-Download — robots.txt-konform).
 - **v0.5** — Backup/Restore, KI-Zusammenfassungen im Mod-Detail-Dialog (via
   IHostServices AI-Provider wenn im Host verfügbar).
 - **v0.6** — Preview-Bilder in der Installiert- und ModHub-Liste (DDS → PNG

@@ -12,6 +12,26 @@
 
 ## Aktueller Stand
 
+**v0.2.0 (M3.2 — ModHub-Katalog):**
+- Drei Tabs: „Installiert" (v0.1), „ModHub" (neu), „Downloads" (neu)
+- `ModHubService` (658 Zeilen aus LS-ModManager extrahiert): HTTPS-Scraping
+  von farming-simulator.com, Katalog-Seiten iterativ laden, Kategorien +
+  Detail-Fetch, Direct-Download vom GIANTS-CDN.
+- `CatalogCache`: JSON-Cache im PluginCacheDir/catalog/ mit atomarem
+  Save + Sidecar-Seen-Snapshot für "NEU seit letztem Start"-Badge.
+- `DdsToPngConverter` (Pfim + SkiaSharp): DDS-Icons in Mods → PNG für
+  spätere Preview-Anzeige (in v0.6 im Installiert-Tab genutzt).
+- `Ls25Paths`: Plugin-lokaler Pfad-Helper (statt globaler AppPaths in
+  LS-ModManager); nutzt `IHostServices.PluginCacheDir` für Downloads,
+  Previews, Katalog.
+- `ModHubViewModel` + `ModHubView`: Katalog-Tab mit Live-Suche
+  (Titel/Autor), Kategorie-Dropdown, Refresh-Button, Detail-im-Browser,
+  Download-Klick (Progress via IHostServices.BeginProgress).
+- `DownloadsViewModel` + `DownloadsView`: Downloads-Tab listet ZIPs im
+  Plugin-Downloads-Ordner, Install-Klick reicht sie an `ModInstallService`
+  weiter, Delete-Klick löscht.
+- `ModInstallService` erweitert: `ListDownloaded()`, `DeleteDownload()`.
+
 **v0.1.0 (M3.1 — Skelett + Installiert-Tab):**
 - `Ls25Plugin`: Entry-Point, ein Target (FS25/2300320).
 - `Ls25PathResolver`: Findet Mods-Ordner via Host-liefertem `DetectedGame.UserDataDir`
@@ -28,15 +48,14 @@
 
 ## Roadmap
 
-- **v0.2** — Katalog-Support: ModHub-Service (HTML-Scraping, Kategorien,
-  Suche, Download); eigenes ModHub-Tab. Übernahme aus LS-ModManager
-  `Services/ModHubService.cs`.
-- **v0.3** — Hof Hirschfeld-Katalog.
-- **v0.4** — modhoster-Katalog.
-- **v0.5** — Backup/Restore, KI-Zusammenfassungen (via IHostServices AI-Provider
-  wenn im Host verfügbar).
-- **v0.6** — Preview-Bilder aus ZIPs (DDS → PNG via Pfim + SkiaSharp) + Cover-Column
-  in der Installiert-Liste.
+- **v0.3** — Hof Hirschfeld-Katalog (weiterer Katalog-Tab, ähnlich ModHub aber
+  HTML-Struktur ist anders).
+- **v0.4** — modhoster.de-Katalog (Login-Pflicht: nur Detail-Link im Browser
+  öffnen, kein Auto-Download — robots.txt-konform).
+- **v0.5** — Backup/Restore, KI-Zusammenfassungen im Mod-Detail-Dialog (via
+  IHostServices AI-Provider wenn im Host verfügbar).
+- **v0.6** — Preview-Bilder in der Installiert- und ModHub-Liste (DDS → PNG
+  via bereits vorhandenem DdsToPngConverter + Cover-Cache vom ModHub).
 
 ## Referenz
 

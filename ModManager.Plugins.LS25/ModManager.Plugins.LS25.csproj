@@ -11,6 +11,9 @@
     <PackageReference Include="Avalonia"
                       PrivateAssets="all" ExcludeAssets="runtime" />
     <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="HtmlAgilityPack" />
+    <PackageReference Include="Pfim" />
+    <PackageReference Include="SkiaSharp" />
   </ItemGroup>
 
   <ItemGroup>

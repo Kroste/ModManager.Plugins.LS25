@@ -14,19 +14,25 @@ Backup/Restore folgen in späteren Versionen.
   - Windows: `Documents\My Games\FarmingSimulator2025\mods\`
   - Linux (Proton): `<Proton-Präfix>/drive_c/users/steamuser/My Documents/My Games/FarmingSimulator2025/mods/`
 
-## Aktueller Umfang (v0.1.0)
+## Aktueller Umfang (v0.2.0)
 
-- Tab **Installiert**: alle Mods im Mods-Ordner listen, Aktiv/Inaktiv toggeln
-  (`.zip.disabled`-Rename), lokale ZIP installieren (mit modDesc.xml-Validierung),
-  deinstallieren, Mods-Ordner öffnen.
+Drei Tabs:
+
+- **Installiert**: alle Mods im Mods-Ordner listen, Aktiv/Inaktiv toggeln
+  (`.zip.disabled`-Rename), lokale ZIP installieren, deinstallieren, Ordner
+  öffnen.
+- **ModHub** *(neu in v0.2)*: GIANTS-Katalog live scrapen, Titel-/Autor-Suche,
+  Kategorien-Filter, Refresh-Button, Direct-Download vom Steam-CDN in den
+  Plugin-Downloads-Ordner.
+- **Downloads** *(neu in v0.2)*: alle heruntergeladenen ZIPs listen, per Klick
+  in den Mods-Ordner installieren oder löschen.
 
 ## Roadmap
 
-- v0.2 — Katalog **ModHub** (giants-software.com)
 - v0.3 — Katalog **Hof Hirschfeld**
-- v0.4 — Katalog **modhoster.de**
+- v0.4 — Katalog **modhoster.de** (Detail-Link im Browser, kein Auto-Download)
 - v0.5 — Backup/Restore, KI-Zusammenfassungen (via IHostServices AI-Provider)
-- v0.6 — Preview-Bilder (DDS → PNG dekodieren)
+- v0.6 — Preview-Bilder (DDS → PNG via DdsToPngConverter)
 
 ## Installation
 

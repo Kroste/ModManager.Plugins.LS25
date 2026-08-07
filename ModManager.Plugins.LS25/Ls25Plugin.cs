@@ -14,9 +14,9 @@ public sealed class Ls25Plugin : IGameModPlugin
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.ls25",
         DisplayName: "Landwirtschafts-Simulator 25",
-        Version: "0.1.0",
+        Version: "0.2.0",
         Author: "Kroste",
-        Description: "Mod-Manager für den Landwirtschafts-Simulator 25 (FS25).");
+        Description: "Mod-Manager für den Landwirtschafts-Simulator 25 (FS25) mit ModHub-Katalog.");
 
     public IReadOnlyList<GameTarget> Targets { get; } = new[]
     {
@@ -28,22 +28,29 @@ public sealed class Ls25Plugin : IGameModPlugin
     };
 
     private IHostServices? _host;
+    private Ls25Paths? _paths;
+    private ModHubService? _hub;
+    private CatalogCache? _cache;
     private readonly Dictionary<string, ModInstallService> _installers = new();
-    private readonly Ls25PathResolver _paths = new();
     private readonly ModDescReader _reader = new();
+    private readonly Ls25PathResolver _pathResolver = new();
 
     public Task InitializeAsync(IHostServices host, IReadOnlyList<DetectedGame> activatedGames, CancellationToken ct)
     {
         _host = host;
+        _paths = new Ls25Paths(host);
+        _cache = new CatalogCache(_paths);
+        _hub = new ModHubService(_paths, host.CreateHttpClient("modhub"));
+
         foreach (var game in activatedGames)
         {
-            var modsDir = _paths.GetModsDir(game);
+            var modsDir = _pathResolver.GetModsDir(game);
             if (modsDir is null)
             {
                 host.Logger.Warn("LS25: konnte keinen Mods-Pfad für {Game} ableiten", game.Target.DisplayName);
                 continue;
             }
-            _installers[game.Target.GameId] = new ModInstallService(modsDir, _reader);
+            _installers[game.Target.GameId] = new ModInstallService(modsDir, _reader, _paths);
             host.Logger.Info("LS25 initialisiert: Mods-Ordner = {Path}", modsDir);
         }
         return Task.CompletedTask;
@@ -51,14 +58,18 @@ public sealed class Ls25Plugin : IGameModPlugin
 
     public IEnumerable<IGameTabContribution> GetTabContributions(DetectedGame game)
     {
-        if (!_installers.TryGetValue(game.Target.GameId, out var installer) || _host is null)
+        if (!_installers.TryGetValue(game.Target.GameId, out var installer) || _host is null
+            || _hub is null || _cache is null)
             yield break;
 
         yield return new InstalledTab(installer, _host);
+        yield return new ModHubTab(_hub, _cache, installer, _host);
+        yield return new DownloadsTab(installer, _host);
     }
 
     public Task ShutdownAsync()
     {
+        _hub?.Dispose();
         _host?.Logger.Info("LS25 shutdown");
         return Task.CompletedTask;
     }
@@ -67,20 +78,46 @@ public sealed class Ls25Plugin : IGameModPlugin
     {
         private readonly ModInstallService _installer;
         private readonly IHostServices _host;
-
         public InstalledTab(ModInstallService installer, IHostServices host)
-        {
-            _installer = installer;
-            _host = host;
-        }
-
+        { _installer = installer; _host = host; }
         public string Id => "installed";
         public string Label => "Installiert";
-        public string Icon => "\U0001F69C"; // 🚜
+        public string Icon => "\U0001F69C";
         public int Order => 0;
         public bool IsVisible(DetectedGame game) => true;
-
         public Control CreateView(DetectedGame game, IHostServices host) =>
             new InstalledModsView { DataContext = new InstalledModsViewModel(_installer, _host) };
+    }
+
+    private sealed class ModHubTab : IGameTabContribution
+    {
+        private readonly ModHubService _hub;
+        private readonly CatalogCache _cache;
+        private readonly ModInstallService _installer;
+        private readonly IHostServices _host;
+        public ModHubTab(ModHubService hub, CatalogCache cache, ModInstallService installer, IHostServices host)
+        { _hub = hub; _cache = cache; _installer = installer; _host = host; }
+        public string Id => "modhub";
+        public string Label => "ModHub";
+        public string Icon => "\U0001F3EA"; // 🏪
+        public int Order => 10;
+        public bool IsVisible(DetectedGame game) => true;
+        public Control CreateView(DetectedGame game, IHostServices host) =>
+            new ModHubView { DataContext = new ModHubViewModel(_hub, _cache, _installer, _host) };
+    }
+
+    private sealed class DownloadsTab : IGameTabContribution
+    {
+        private readonly ModInstallService _installer;
+        private readonly IHostServices _host;
+        public DownloadsTab(ModInstallService installer, IHostServices host)
+        { _installer = installer; _host = host; }
+        public string Id => "downloads";
+        public string Label => "Downloads";
+        public string Icon => "\U0001F4E5"; // 📥
+        public int Order => 20;
+        public bool IsVisible(DetectedGame game) => true;
+        public Control CreateView(DetectedGame game, IHostServices host) =>
+            new DownloadsView { DataContext = new DownloadsViewModel(_installer, _host) };
     }
 }

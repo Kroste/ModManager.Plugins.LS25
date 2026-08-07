@@ -17,14 +17,61 @@ public sealed class ModInstallService
 
     private readonly string _modsDir;
     private readonly ModDescReader _reader;
+    private readonly Ls25Paths? _paths;
 
-    public ModInstallService(string modsDir, ModDescReader reader)
+    public ModInstallService(string modsDir, ModDescReader reader, Ls25Paths? paths = null)
     {
         _modsDir = modsDir;
         _reader = reader;
+        _paths = paths;
     }
 
     public string ModsDir => _modsDir;
+
+    /// <summary>Downloads-Ordner (kommt vom Ls25Paths, wenn injiziert).</summary>
+    public string? DownloadsDir => _paths?.DownloadsDir;
+
+    /// <summary>Alle ZIPs im Downloads-Ordner, die noch nicht installiert wurden.</summary>
+    public IReadOnlyList<InstalledMod> ListDownloaded()
+    {
+        if (_paths is null) return Array.Empty<InstalledMod>();
+        var dir = _paths.DownloadsDir;
+        if (!Directory.Exists(dir)) return Array.Empty<InstalledMod>();
+
+        var result = new List<InstalledMod>();
+        foreach (var file in Directory.EnumerateFiles(dir, "*.zip"))
+        {
+            var info = new FileInfo(file);
+            var read = _reader.Read(file);
+            result.Add(new InstalledMod(
+                FilePath: file,
+                FileName: Path.GetFileName(file),
+                FileSizeBytes: info.Length,
+                InstalledUtc: info.LastWriteTimeUtc,
+                IsEnabled: true,
+                Metadata: read.Metadata,
+                ReadError: read.Error));
+        }
+        return result;
+    }
+
+    /// <summary>Löscht einen Download aus dem Downloads-Ordner. Nur Dateien im
+    /// Downloads-Ordner dürfen gelöscht werden.</summary>
+    public void DeleteDownload(string filePath)
+    {
+        if (_paths is null) throw new InvalidOperationException("Downloads-Ordner nicht konfiguriert.");
+        var normalized = Path.GetFullPath(filePath);
+        var downloads = Path.GetFullPath(_paths.DownloadsDir);
+        if (!normalized.StartsWith(downloads, StringComparison.Ordinal))
+            throw new InvalidOperationException("Datei liegt nicht im Downloads-Ordner");
+        if (!File.Exists(normalized))
+        {
+            Log.Warn("Download bereits weg: {Path}", normalized);
+            return;
+        }
+        File.Delete(normalized);
+        Log.Info("Download gelöscht: {Path}", normalized);
+    }
 
     /// <summary>Liest alle Mods (.zip und .zip.disabled) aus dem Mod-Ordner.</summary>
     public IReadOnlyList<InstalledMod> ListInstalled()

@@ -12,6 +12,19 @@
 
 ## Aktueller Stand
 
+**v0.3.0 (M3.3 — Hof-Hirschfeld-Katalog):**
+- Vierter Tab **Hof Hirschfeld** (Community-Umbauten für LS25). Iteriert
+  über Kategorien-Slugs von der Startseite, parst Mod-Karten pro Kategorie.
+- **Kein In-App-Download**: die Site hat ein Consent-Overlay für
+  Werbung/Downloads, das über HTTP-Scrape nicht umgehbar wäre (und wollen
+  wir auch nicht — die Community-Site ist werbefinanziert). Detail-Button
+  öffnet die Mod-Seite im Browser.
+- `HofHirschfeldCatalogService` (180 Z., 1:1 aus LS-ModManager mit
+  HttpClient-Injection statt globaler Instanz).
+- `HofHirschfeldViewModel` + `HofHirschfeldView`: Live-Suche in
+  Titel/Kategorie, „Katalog neu laden"-Button, Detail-Button, Hinweis-Text
+  zum Consent-Overlay.
+
 **v0.2.0 (M3.2 — ModHub-Katalog):**
 - Drei Tabs: „Installiert" (v0.1), „ModHub" (neu), „Downloads" (neu)
 - `ModHubService` (658 Zeilen aus LS-ModManager extrahiert): HTTPS-Scraping
@@ -48,8 +61,6 @@
 
 ## Roadmap
 
-- **v0.3** — Hof Hirschfeld-Katalog (weiterer Katalog-Tab, ähnlich ModHub aber
-  HTML-Struktur ist anders).
 - **v0.4** — modhoster.de-Katalog (Login-Pflicht: nur Detail-Link im Browser
   öffnen, kein Auto-Download — robots.txt-konform).
 - **v0.5** — Backup/Restore, KI-Zusammenfassungen im Mod-Detail-Dialog (via

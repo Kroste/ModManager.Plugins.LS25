@@ -13,9 +13,10 @@ using NLog;
 namespace ModManager.Plugins.LS25.Views;
 
 /// <summary>
-/// VM für den ModHub-Katalog-Tab: Katalog beim ersten Öffnen aus Cache laden,
-/// im Hintergrund alle Seiten sammeln, Live-Suchfilter, Sort- und Kategorie-
-/// Auswahl, Klick auf Karte → Download in Plugin-Downloads-Ordner.
+/// VM für den ModHub-Katalog-Tab. Aggregiert die drei Quellen (GIANTS ModHub,
+/// Hof Hirschfeld, modhoster) in einer Liste — wie im standalone LS-ModManager.
+/// GIANTS lädt seitenweise mit Direct-Download, die anderen zwei nur Detail-
+/// im-Browser wegen Consent-Overlay / Login-Pflicht.
 /// </summary>
 public sealed partial class ModHubViewModel : ObservableObject
 {
@@ -23,6 +24,8 @@ public sealed partial class ModHubViewModel : ObservableObject
     private const string Language = "de";
 
     private readonly ModHubService _hub;
+    private readonly HofHirschfeldCatalogService _hof;
+    private readonly ModhosterCatalogService _modhoster;
     private readonly CatalogCache _cache;
     private readonly ModInstallService _installer;
     private readonly IHostServices _host;
@@ -31,10 +34,13 @@ public sealed partial class ModHubViewModel : ObservableObject
     private HashSet<string>? _seenSnapshot;
     private CancellationTokenSource? _fullLoadCts;
 
-    public ModHubViewModel(ModHubService hub, CatalogCache cache,
+    public ModHubViewModel(ModHubService hub, HofHirschfeldCatalogService hof,
+        ModhosterCatalogService modhoster, CatalogCache cache,
         ModInstallService installer, IHostServices host)
     {
         _hub = hub;
+        _hof = hof;
+        _modhoster = modhoster;
         _cache = cache;
         _installer = installer;
         _host = host;
@@ -45,19 +51,30 @@ public sealed partial class ModHubViewModel : ObservableObject
         };
         SelectedCategory = Categories[0];
 
-        // Ersten Fresh-Load im Hintergrund starten. Cache zeigt sofort was;
-        // Full-Load appended nur wirklich neue Einträge (kein Flicker).
+        Sources = new ObservableCollection<SourceFilterOption>
+        {
+            new(null, "Alle Quellen"),
+            new(ModHubEntry.GiantsSource, "GIANTS ModHub"),
+            new(ModHubEntry.HofHirschfeldSource, "Hof Hirschfeld"),
+            new(ModHubEntry.ModhosterSource, "modhoster"),
+        };
+        SelectedSource = Sources[0];
+
         _ = InitializeAsync();
     }
 
     public ObservableCollection<CatalogRow> Rows { get; } = new();
     public ObservableCollection<ModHubCategory> Categories { get; }
+    public ObservableCollection<SourceFilterOption> Sources { get; }
 
     [ObservableProperty]
     private string _searchText = string.Empty;
 
     [ObservableProperty]
     private ModHubCategory? _selectedCategory;
+
+    [ObservableProperty]
+    private SourceFilterOption? _selectedSource;
 
     [ObservableProperty]
     private string _status = "Katalog wird geladen …";
@@ -67,17 +84,20 @@ public sealed partial class ModHubViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSelection))]
+    [NotifyPropertyChangedFor(nameof(CanDownloadSelected))]
+    [NotifyPropertyChangedFor(nameof(SelectionNeedsBrowser))]
     private CatalogRow? _selected;
 
     public bool HasSelection => Selected is not null;
+    public bool CanDownloadSelected => Selected?.Source.CanInAppDownload == true;
+    public bool SelectionNeedsBrowser => Selected is not null && !Selected.Source.CanInAppDownload;
 
-    partial void OnSelectedChanged(CatalogRow? value) => OnPropertyChanged(nameof(HasSelection));
     partial void OnSearchTextChanged(string value) => ApplyFilter();
     partial void OnSelectedCategoryChanged(ModHubCategory? value) => ApplyFilter();
+    partial void OnSelectedSourceChanged(SourceFilterOption? value) => ApplyFilter();
 
     private async Task InitializeAsync()
     {
-        // Erst Cache-Snapshot anzeigen (offline sofort).
         var snapshot = _cache.Load(Language);
         _seenSnapshot = _cache.LoadSeenSnapshot(Language);
         if (snapshot is not null)
@@ -86,10 +106,7 @@ public sealed partial class ModHubViewModel : ObservableObject
             Status = $"{Rows.Count} Mods aus Cache (Alter: {(int)(DateTime.UtcNow - snapshot.SavedUtc).TotalHours} h).";
         }
 
-        // Kategorien parallel holen (billig).
         _ = LoadCategoriesAsync();
-
-        // Jetzt Full-Load — appended nur neue Einträge, kein Clear.
         await RefreshCatalogAsync();
     }
 
@@ -114,28 +131,17 @@ public sealed partial class ModHubViewModel : ObservableObject
         var ct = _fullLoadCts.Token;
 
         IsBusy = true;
-        Status = "Vollständiger Katalog-Load …";
-        int page = 1;
-        int totalNew = 0;
+        Status = "Katalog-Load …";
         try
         {
-            while (!ct.IsCancellationRequested)
-            {
-                var pageEntries = await _hub.FetchCatalogPageAsync(page, Language, ct);
-                if (pageEntries.Count == 0) break;
+            var giantsTask = LoadGiantsAsync(ct);
+            var hofTask = LoadHofHirschfeldAsync(ct);
+            var modhosterTask = LoadModhosterAsync(ct);
+            await Task.WhenAll(giantsTask, hofTask, modhosterTask);
 
-                int addedThisPage = AddEntries(pageEntries);
-                totalNew += addedThisPage;
-                Status = $"Katalog-Load: Seite {page} · {Rows.Count} Mods sichtbar";
-                page++;
-                if (pageEntries.Count < 20) break; // GIANTS Page-Size
-                await Task.Delay(TimeSpan.FromMilliseconds(300), ct); // sanfter Rate-Limit
-            }
-
-            // Snapshot der aktuellen URLs für "neue Mods seit letztem Start"-Erkennung.
             _cache.Save(_allEntries, Language);
             _cache.SaveSeenSnapshot(_allEntries.Select(e => e.DetailUrl), Language);
-            Status = $"{Rows.Count} Mods im Katalog · {totalNew} neu geladen";
+            Status = $"{_allEntries.Count} Mods im Katalog · {Rows.Count} sichtbar";
         }
         catch (OperationCanceledException) { /* silent */ }
         catch (Exception ex)
@@ -147,6 +153,55 @@ public sealed partial class ModHubViewModel : ObservableObject
         {
             IsBusy = false;
         }
+    }
+
+    private async Task LoadGiantsAsync(CancellationToken ct)
+    {
+        int page = 1;
+        while (!ct.IsCancellationRequested)
+        {
+            var pageEntries = await _hub.FetchCatalogPageAsync(page, Language, ct);
+            if (pageEntries.Count == 0) break;
+            AddEntries(pageEntries);
+            Status = $"GIANTS Seite {page} · {Rows.Count} sichtbar";
+            page++;
+            if (pageEntries.Count < 20) break;
+            await Task.Delay(TimeSpan.FromMilliseconds(300), ct);
+        }
+    }
+
+    private async Task LoadHofHirschfeldAsync(CancellationToken ct)
+    {
+        try
+        {
+            var slugs = await _hof.FetchCategorySlugsAsync(ct);
+            foreach (var slug in slugs)
+            {
+                if (ct.IsCancellationRequested) return;
+                var entries = await _hof.FetchCategoryPageAsync(slug, 1, ct);
+                AddEntries(entries);
+            }
+        }
+        catch (Exception ex) { Log.Debug(ex, "Hof-Hirschfeld-Load fehlgeschlagen"); }
+    }
+
+    private async Task LoadModhosterAsync(CancellationToken ct)
+    {
+        try
+        {
+            int page = 1;
+            while (!ct.IsCancellationRequested)
+            {
+                var entries = await _modhoster.FetchCatalogPageAsync(page, ct);
+                if (entries.Count == 0) break;
+                AddEntries(entries);
+                page++;
+                if (entries.Count < 20) break;
+                if (page > 20) break; // safety
+                await Task.Delay(TimeSpan.FromMilliseconds(300), ct);
+            }
+        }
+        catch (Exception ex) { Log.Debug(ex, "Modhoster-Load fehlgeschlagen"); }
     }
 
     private int AddEntries(IEnumerable<ModHubEntry> entries)
@@ -176,11 +231,15 @@ public sealed partial class ModHubViewModel : ObservableObject
 
     private bool RowMatchesFilter(CatalogRow row)
     {
+        if (SelectedSource?.SourceKey is string src && !string.Equals(row.Source.Source, src, StringComparison.Ordinal))
+            return false;
+
         var q = SearchText?.Trim();
         if (!string.IsNullOrEmpty(q))
         {
             if (!(row.Source.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
-                  || row.Source.Author.Contains(q, StringComparison.OrdinalIgnoreCase)))
+                  || row.Source.Author.Contains(q, StringComparison.OrdinalIgnoreCase)
+                  || row.Source.Category.Contains(q, StringComparison.OrdinalIgnoreCase)))
                 return false;
         }
         if (SelectedCategory is not null && !string.IsNullOrEmpty(SelectedCategory.Filter))
@@ -191,10 +250,10 @@ public sealed partial class ModHubViewModel : ObservableObject
         return true;
     }
 
-    [RelayCommand(CanExecute = nameof(HasSelection))]
+    [RelayCommand(CanExecute = nameof(CanDownloadSelected))]
     private async Task DownloadSelectedAsync()
     {
-        if (Selected is null) return;
+        if (Selected is null || !Selected.Source.CanInAppDownload) return;
         var modIdMatch = System.Text.RegularExpressions.Regex.Match(
             Selected.Source.DetailUrl, @"mod_id=(\d+)");
         if (!modIdMatch.Success)
@@ -246,9 +305,22 @@ public sealed partial class CatalogRow : ObservableObject
     public string? Version => Source.Version;
     public string? SizeText => Source.SizeText;
 
+    public string SourceLabel => Source.Source switch
+    {
+        ModHubEntry.GiantsSource => "GIANTS",
+        ModHubEntry.HofHirschfeldSource => "Hof Hirschfeld",
+        ModHubEntry.ModhosterSource => "modhoster",
+        _ => Source.Source,
+    };
+
+    public bool CanInAppDownload => Source.CanInAppDownload;
+    public bool NeedsBrowser => !Source.CanInAppDownload;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(BadgeText))]
     private bool _isNew;
 
     public string BadgeText => IsNew ? "NEU" : "";
 }
+
+public sealed record SourceFilterOption(string? SourceKey, string Label);

@@ -14,9 +14,9 @@ public sealed class Ls25Plugin : IGameModPlugin
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.ls25",
         DisplayName: "Landwirtschafts-Simulator 25",
-        Version: "0.4.0",
+        Version: "0.4.1",
         Author: "Kroste",
-        Description: "Mod-Manager für den Landwirtschafts-Simulator 25 (FS25) mit ModHub-, Hof-Hirschfeld- und Modhoster-Katalog.");
+        Description: "Mod-Manager für den Landwirtschafts-Simulator 25 (FS25) — ModHub aggregiert GIANTS + Hof Hirschfeld + modhoster in einem Tab.");
 
     public IReadOnlyList<GameTarget> Targets { get; } = new[]
     {
@@ -67,9 +67,7 @@ public sealed class Ls25Plugin : IGameModPlugin
             yield break;
 
         yield return new InstalledTab(installer, _host);
-        yield return new ModHubTab(_hub, _cache, installer, _host);
-        yield return new HofHirschfeldTab(_hofHirschfeld, _host);
-        yield return new ModhosterTab(_modhoster, _host);
+        yield return new ModHubTab(_hub, _hofHirschfeld, _modhoster, _cache, installer, _host);
         yield return new DownloadsTab(installer, _host);
     }
 
@@ -100,48 +98,22 @@ public sealed class Ls25Plugin : IGameModPlugin
     private sealed class ModHubTab : IGameTabContribution
     {
         private readonly ModHubService _hub;
+        private readonly HofHirschfeldCatalogService _hof;
+        private readonly ModhosterCatalogService _modhoster;
         private readonly CatalogCache _cache;
         private readonly ModInstallService _installer;
         private readonly IHostServices _host;
-        public ModHubTab(ModHubService hub, CatalogCache cache, ModInstallService installer, IHostServices host)
-        { _hub = hub; _cache = cache; _installer = installer; _host = host; }
+        public ModHubTab(ModHubService hub, HofHirschfeldCatalogService hof,
+            ModhosterCatalogService modhoster, CatalogCache cache,
+            ModInstallService installer, IHostServices host)
+        { _hub = hub; _hof = hof; _modhoster = modhoster; _cache = cache; _installer = installer; _host = host; }
         public string Id => "modhub";
         public string Label => "ModHub";
         public string Icon => "\U0001F3EA"; // 🏪
         public int Order => 10;
         public bool IsVisible(DetectedGame game) => true;
         public Control CreateView(DetectedGame game, IHostServices host) =>
-            new ModHubView { DataContext = new ModHubViewModel(_hub, _cache, _installer, _host) };
-    }
-
-    private sealed class HofHirschfeldTab : IGameTabContribution
-    {
-        private readonly HofHirschfeldCatalogService _service;
-        private readonly IHostServices _host;
-        public HofHirschfeldTab(HofHirschfeldCatalogService service, IHostServices host)
-        { _service = service; _host = host; }
-        public string Id => "hofhirschfeld";
-        public string Label => "Hof Hirschfeld";
-        public string Icon => "\U0001F3E1"; // 🏡
-        public int Order => 15;
-        public bool IsVisible(DetectedGame game) => true;
-        public Control CreateView(DetectedGame game, IHostServices host) =>
-            new HofHirschfeldView { DataContext = new HofHirschfeldViewModel(_service, _host) };
-    }
-
-    private sealed class ModhosterTab : IGameTabContribution
-    {
-        private readonly ModhosterCatalogService _service;
-        private readonly IHostServices _host;
-        public ModhosterTab(ModhosterCatalogService service, IHostServices host)
-        { _service = service; _host = host; }
-        public string Id => "modhoster";
-        public string Label => "modhoster";
-        public string Icon => "\U0001F310"; // 🌐
-        public int Order => 17;
-        public bool IsVisible(DetectedGame game) => true;
-        public Control CreateView(DetectedGame game, IHostServices host) =>
-            new ModhosterView { DataContext = new ModhosterViewModel(_service, _host) };
+            new ModHubView { DataContext = new ModHubViewModel(_hub, _hof, _modhoster, _cache, _installer, _host) };
     }
 
     private sealed class DownloadsTab : IGameTabContribution

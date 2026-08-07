@@ -14,17 +14,16 @@ public sealed class ModHubView : UserControl
 {
     public ModHubView()
     {
-        // Toolbar: Suche + Kategorie-Filter + Refresh + Download + Detail-Link
-        var searchBox = new TextBox
+        // Toolbar: Quelle-Filter + Kategorie-Filter + Suche + Refresh + Aktionen.
+        // Quellen: „Alle" / GIANTS / Hof Hirschfeld / modhoster — im Prinzip wie
+        // im standalone LS-ModManager (dort implizit über Sort/Filter).
+        var sourceBox = new ComboBox
         {
-            Width = 240,
-            // Watermark ist in Avalonia 12 deprecated → PlaceholderText.
-            [!TextBox.PlaceholderTextProperty] = new Binding
-            {
-                Source = "Titel oder Autor filtern …",
-            },
+            Width = 170,
+            DisplayMemberBinding = new Binding(nameof(SourceFilterOption.Label)),
         };
-        searchBox.Bind(TextBox.TextProperty, new Binding(nameof(ModHubViewModel.SearchText))
+        sourceBox.Bind(ComboBox.ItemsSourceProperty, new Binding(nameof(ModHubViewModel.Sources)));
+        sourceBox.Bind(ComboBox.SelectedItemProperty, new Binding(nameof(ModHubViewModel.SelectedSource))
         { Mode = BindingMode.TwoWay });
 
         var categoryBox = new ComboBox
@@ -36,12 +35,25 @@ public sealed class ModHubView : UserControl
         categoryBox.Bind(ComboBox.SelectedItemProperty, new Binding(nameof(ModHubViewModel.SelectedCategory))
         { Mode = BindingMode.TwoWay });
 
+        var searchBox = new TextBox
+        {
+            Width = 220,
+            [!TextBox.PlaceholderTextProperty] = new Binding
+            {
+                Source = "Titel/Autor/Kategorie …",
+            },
+        };
+        searchBox.Bind(TextBox.TextProperty, new Binding(nameof(ModHubViewModel.SearchText))
+        { Mode = BindingMode.TwoWay });
+
         var refreshBtn = new Button { Content = "🔄  Katalog neu laden" };
         refreshBtn.Bind(Button.CommandProperty, new Binding(nameof(ModHubViewModel.RefreshCatalogCommand)));
 
         var downloadBtn = new Button { Content = "⬇  Download" };
         downloadBtn.Classes.Add("accent");
         downloadBtn.Bind(Button.CommandProperty, new Binding(nameof(ModHubViewModel.DownloadSelectedCommand)));
+        // Nur sichtbar bei GIANTS-Rows (In-App-Download möglich).
+        downloadBtn.Bind(Button.IsVisibleProperty, new Binding(nameof(ModHubViewModel.CanDownloadSelected)));
 
         var detailBtn = new Button { Content = "🌐  Detail im Browser" };
         detailBtn.Bind(Button.CommandProperty, new Binding(nameof(ModHubViewModel.OpenDetailInBrowserCommand)));
@@ -52,8 +64,9 @@ public sealed class ModHubView : UserControl
             Spacing = 8,
             Margin = new Thickness(0, 0, 0, 12),
         };
-        toolbar.Children.Add(searchBox);
+        toolbar.Children.Add(sourceBox);
         toolbar.Children.Add(categoryBox);
+        toolbar.Children.Add(searchBox);
         toolbar.Children.Add(refreshBtn);
         toolbar.Children.Add(new Rectangle
         {
@@ -62,6 +75,15 @@ public sealed class ModHubView : UserControl
         });
         toolbar.Children.Add(downloadBtn);
         toolbar.Children.Add(detailBtn);
+
+        var hint = new TextBlock
+        {
+            Text = "GIANTS ModHub: In-App-Download · Hof Hirschfeld & modhoster: Detail-Klick öffnet die Seite im Browser (Consent-Overlay bzw. Login-Pflicht).",
+            Opacity = 0.65,
+            FontSize = 11,
+            Margin = new Thickness(0, 0, 0, 10),
+            TextWrapping = TextWrapping.Wrap,
+        };
 
         var list = new ListBox
         {
@@ -77,31 +99,51 @@ public sealed class ModHubView : UserControl
         list.ItemTemplate = new FuncDataTemplate<CatalogRow>((row, _) =>
         {
             if (row is null) return null;
-            var titleGrid = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+
+            var titleGrid = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
             var title = new TextBlock
             {
                 FontWeight = FontWeight.SemiBold,
                 Foreground = new SolidColorBrush(Color.FromRgb(0xE4, 0xE7, 0xEC)),
+                VerticalAlignment = VerticalAlignment.Center,
             };
             title.Bind(TextBlock.TextProperty, new Binding(nameof(CatalogRow.Title)));
-            var badge = new Border
+
+            var sourceBadge = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(0x33, 0x39, 0x44)),
+                CornerRadius = new CornerRadius(3),
+                Padding = new Thickness(6, 1),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            var sourceBadgeText = new TextBlock
+            {
+                Foreground = new SolidColorBrush(Color.FromRgb(0xB0, 0xB6, 0xC0)),
+                FontSize = 10,
+                FontWeight = FontWeight.SemiBold,
+            };
+            sourceBadgeText.Bind(TextBlock.TextProperty, new Binding(nameof(CatalogRow.SourceLabel)));
+            sourceBadge.Child = sourceBadgeText;
+
+            var newBadge = new Border
             {
                 Background = new SolidColorBrush(Color.FromRgb(0xE0, 0xB1, 0x4C)),
                 CornerRadius = new CornerRadius(3),
                 Padding = new Thickness(6, 1),
                 VerticalAlignment = VerticalAlignment.Center,
             };
-            badge.Bind(Border.IsVisibleProperty, new Binding(nameof(CatalogRow.IsNew)));
-            var badgeText = new TextBlock
+            newBadge.Bind(Border.IsVisibleProperty, new Binding(nameof(CatalogRow.IsNew)));
+            newBadge.Child = new TextBlock
             {
                 Text = "NEU",
                 Foreground = Brushes.Black,
                 FontSize = 10,
                 FontWeight = FontWeight.Bold,
             };
-            badge.Child = badgeText;
+
             titleGrid.Children.Add(title);
-            titleGrid.Children.Add(badge);
+            titleGrid.Children.Add(sourceBadge);
+            titleGrid.Children.Add(newBadge);
 
             var meta = new TextBlock { Opacity = 0.75, FontSize = 11 };
             meta.Bind(TextBlock.TextProperty, new MultiBinding
@@ -128,6 +170,7 @@ public sealed class ModHubView : UserControl
             Children =
             {
                 Make(toolbar, DockPanel.DockProperty, Dock.Top),
+                Make(hint, DockPanel.DockProperty, Dock.Top),
                 Make(status, DockPanel.DockProperty, Dock.Bottom),
                 list,
             },

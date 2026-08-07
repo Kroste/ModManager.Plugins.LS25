@@ -47,11 +47,16 @@ jobs:
           dotnet build --no-restore -c Release
           -p:Version=${{ steps.ver.outputs.v }}
 
-      - name: Plugin-Bundle packen
+      - name: Plugin-Bundle packen (Plugin-DLL + plugin.json + plugin-eigene Deps)
+        # Alles aus bin/ AUSSER .pdb und .deps.json. Die csproj ist so
+        # konfiguriert dass Host-Assemblies (Kroste.ModManager.PluginContracts,
+        # Avalonia*, CommunityToolkit.Mvvm) gar nicht im Output landen —
+        # deshalb ist alles was hier ist echte Plugin-Runtime-Dep
+        # (HtmlAgilityPack.dll, Pfim.dll, SkiaSharp.dll, runtimes/ inkl. native libs).
         run: |
           mkdir -p bundle
-          cp ModManager.Plugins.LS25/bin/Release/net10.0/ModManager.Plugins.LS25.dll bundle/
-          cp ModManager.Plugins.LS25/bin/Release/net10.0/plugin.json bundle/
+          cp -r ModManager.Plugins.LS25/bin/Release/net10.0/. bundle/
+          rm -f bundle/*.pdb bundle/*.deps.json
           cd bundle
           zip -r "../ModManager.Plugins.LS25-${{ steps.ver.outputs.v }}.zip" .
 

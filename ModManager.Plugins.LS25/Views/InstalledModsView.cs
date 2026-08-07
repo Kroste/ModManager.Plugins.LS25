@@ -5,6 +5,7 @@ using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 
 namespace ModManager.Plugins.LS25.Views;
 
@@ -82,6 +83,31 @@ public sealed class InstalledModsView : UserControl
         list.ItemTemplate = new FuncDataTemplate<ModRow>((row, _) =>
         {
             if (row is null) return null;
+
+            // Cover-Frame: 72×54 (4:3 wie in-Game-Icons), Fallback ist ein 🚜.
+            var coverFrame = new Border
+            {
+                Width = 72, Height = 54,
+                Background = new SolidColorBrush(Color.FromRgb(0x2A, 0x2F, 0x38)),
+                CornerRadius = new CornerRadius(4),
+                ClipToBounds = true,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            var coverPanel = new Panel();
+            var coverFallback = new TextBlock
+            {
+                Text = "🚜",
+                FontSize = 26,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Opacity = 0.6,
+            };
+            var coverImage = new Image { Stretch = Stretch.UniformToFill };
+            coverImage.Bind(Image.SourceProperty, new Binding(nameof(ModRow.Preview)));
+            coverPanel.Children.Add(coverFallback);
+            coverPanel.Children.Add(coverImage);
+            coverFrame.Child = coverPanel;
+
             var titleBlock = new TextBlock
             {
                 FontWeight = FontWeight.SemiBold,
@@ -106,12 +132,24 @@ public sealed class InstalledModsView : UserControl
                 Converter = new MetaJoinConverter(),
             });
 
-            return new StackPanel
+            var textStack = new StackPanel
             {
                 Spacing = 2,
-                Margin = new Thickness(6),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(10, 0, 0, 0),
                 Children = { titleBlock, meta },
             };
+
+            var grid = new Grid
+            {
+                ColumnDefinitions = new ColumnDefinitions("Auto,*"),
+                Margin = new Thickness(6),
+            };
+            Grid.SetColumn(coverFrame, 0);
+            Grid.SetColumn(textStack, 1);
+            grid.Children.Add(coverFrame);
+            grid.Children.Add(textStack);
+            return grid;
         }, supportsRecycling: true);
 
         var summary = new TextBlock

@@ -3,6 +3,8 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Avalonia.Media.Imaging;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ModManager.PluginContracts;
@@ -14,14 +16,16 @@ public sealed partial class InstalledModsViewModel : ObservableObject
 {
     private readonly ModInstallService _installer;
     private readonly ModBackupService _backup;
+    private readonly ModPreviewService _previews;
     private readonly Ls25Paths _paths;
     private readonly IHostServices _host;
 
     public InstalledModsViewModel(ModInstallService installer, ModBackupService backup,
-        Ls25Paths paths, IHostServices host)
+        ModPreviewService previews, Ls25Paths paths, IHostServices host)
     {
         _installer = installer;
         _backup = backup;
+        _previews = previews;
         _paths = paths;
         _host = host;
         ModsDir = installer.ModsDir;
@@ -65,6 +69,36 @@ public sealed partial class InstalledModsViewModel : ObservableObject
         {
             _host.Logger.Warn(ex, "LS25: Mod-Liste konnte nicht geladen werden");
             Summary = "Fehler beim Lesen des Mods-Ordners.";
+        }
+
+        _ = LoadPreviewsAsync(Mods.ToArray());
+    }
+
+    private async Task LoadPreviewsAsync(ModRow[] rows)
+    {
+        foreach (var row in rows)
+        {
+            try
+            {
+                var path = await _previews.GetOrExtractInstalledPreviewAsync(row.Source.FilePath);
+                if (path is null || !File.Exists(path)) continue;
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    try
+                    {
+                        using var s = File.OpenRead(path);
+                        row.Preview = new Bitmap(s);
+                    }
+                    catch (Exception ex)
+                    {
+                        _host.Logger.Debug(ex, "Preview-Bitmap-Load fehlgeschlagen: {p}", path);
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _host.Logger.Debug(ex, "Preview-Extraction fehlgeschlagen: {p}", row.Source.FilePath);
+            }
         }
     }
 
@@ -217,7 +251,7 @@ public sealed partial class InstalledModsViewModel : ObservableObject
     }
 }
 
-public sealed class ModRow
+public sealed partial class ModRow : ObservableObject
 {
     public InstalledMod Source { get; }
     public ModRow(InstalledMod source) => Source = source;
@@ -230,6 +264,9 @@ public sealed class ModRow
     public string StateLabel => Source.IsEnabled ? "aktiv" : "inaktiv";
     public string FileName => Source.FileName;
     public string? ErrorText => Source.ReadError;
+
+    [ObservableProperty]
+    private Bitmap? _preview;
 
     private static string FormatBytes(long bytes)
     {

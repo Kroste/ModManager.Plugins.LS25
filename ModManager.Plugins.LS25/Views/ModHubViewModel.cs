@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Media.Imaging;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ModManager.PluginContracts;
@@ -29,22 +32,26 @@ public sealed partial class ModHubViewModel : ObservableObject
     private readonly ModhosterCatalogService _modhoster;
     private readonly CatalogCache _cache;
     private readonly ModInstallService _installer;
+    private readonly ModPreviewService _previews;
     private readonly Func<IAiProvider?> _aiFactory;
     private readonly IHostServices _host;
 
     private readonly List<ModHubEntry> _allEntries = new();
     private HashSet<string>? _seenSnapshot;
     private CancellationTokenSource? _fullLoadCts;
+    private CancellationTokenSource? _coverCts;
 
     public ModHubViewModel(ModHubService hub, HofHirschfeldCatalogService hof,
         ModhosterCatalogService modhoster, CatalogCache cache,
-        ModInstallService installer, Func<IAiProvider?> aiFactory, IHostServices host)
+        ModInstallService installer, ModPreviewService previews,
+        Func<IAiProvider?> aiFactory, IHostServices host)
     {
         _hub = hub;
         _hof = hof;
         _modhoster = modhoster;
         _cache = cache;
         _installer = installer;
+        _previews = previews;
         _aiFactory = aiFactory;
         _host = host;
 
@@ -227,15 +234,45 @@ public sealed partial class ModHubViewModel : ObservableObject
     {
         int added = 0;
         var seen = new HashSet<string>(_allEntries.Select(e => e.DetailUrl), StringComparer.Ordinal);
+        var newRows = new List<CatalogRow>();
         foreach (var entry in entries)
         {
             if (!seen.Add(entry.DetailUrl)) continue;
             _allEntries.Add(entry);
             var row = new CatalogRow(entry) { IsNew = _seenSnapshot is not null && !_seenSnapshot.Contains(entry.DetailUrl) };
-            if (RowMatchesFilter(row)) Rows.Add(row);
+            if (RowMatchesFilter(row))
+            {
+                Rows.Add(row);
+                newRows.Add(row);
+            }
             added++;
         }
+        if (newRows.Count > 0) _ = LoadCoversForAsync(newRows);
         return added;
+    }
+
+    private async Task LoadCoversForAsync(List<CatalogRow> rows)
+    {
+        foreach (var row in rows)
+        {
+            if (row.Cover is not null) continue;
+            if (string.IsNullOrWhiteSpace(row.Source.PreviewUrl)) continue;
+            try
+            {
+                var path = await _previews.GetOrDownloadCoverAsync(row.Source.PreviewUrl);
+                if (path is null || !File.Exists(path)) continue;
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    try
+                    {
+                        using var s = File.OpenRead(path);
+                        row.Cover = new Bitmap(s);
+                    }
+                    catch (Exception ex) { Log.Debug(ex, "Cover-Bitmap-Load {p}", path); }
+                });
+            }
+            catch (Exception ex) { Log.Debug(ex, "Cover-Load fehlgeschlagen: {u}", row.Source.PreviewUrl); }
+        }
     }
 
     private void ApplyFilter()
@@ -245,6 +282,38 @@ public sealed partial class ModHubViewModel : ObservableObject
         {
             var row = new CatalogRow(e) { IsNew = _seenSnapshot is not null && !_seenSnapshot.Contains(e.DetailUrl) };
             if (RowMatchesFilter(row)) Rows.Add(row);
+        }
+        _ = LoadCoversAsync();
+    }
+
+    private async Task LoadCoversAsync()
+    {
+        _coverCts?.Cancel();
+        _coverCts = new CancellationTokenSource();
+        var ct = _coverCts.Token;
+        // Snapshot der Rows um Race gegen ApplyFilter zu vermeiden.
+        var snapshot = Rows.ToArray();
+        foreach (var row in snapshot)
+        {
+            if (ct.IsCancellationRequested) return;
+            if (row.Cover is not null) continue;
+            if (string.IsNullOrWhiteSpace(row.Source.PreviewUrl)) continue;
+            try
+            {
+                var path = await _previews.GetOrDownloadCoverAsync(row.Source.PreviewUrl, ct);
+                if (path is null || !File.Exists(path)) continue;
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    try
+                    {
+                        using var s = File.OpenRead(path);
+                        row.Cover = new Bitmap(s);
+                    }
+                    catch (Exception ex) { Log.Debug(ex, "Cover-Bitmap-Load {p}", path); }
+                });
+            }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex) { Log.Debug(ex, "Cover-Load fehlgeschlagen: {u}", row.Source.PreviewUrl); }
         }
     }
 
@@ -397,6 +466,9 @@ public sealed partial class CatalogRow : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(BadgeText))]
     private bool _isNew;
+
+    [ObservableProperty]
+    private Bitmap? _cover;
 
     public string BadgeText => IsNew ? "NEU" : "";
 }

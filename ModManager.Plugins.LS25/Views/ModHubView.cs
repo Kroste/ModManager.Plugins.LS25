@@ -6,6 +6,7 @@ using Avalonia.Data;
 using Avalonia.Data.Converters;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using ModManager.Plugins.LS25.Services;
 
 namespace ModManager.Plugins.LS25.Views;
@@ -106,6 +107,29 @@ public sealed class ModHubView : UserControl
         {
             if (row is null) return null;
 
+            // Cover-Frame 120×80 (GIANTS/Hof/modhoster liefern meist Landscape).
+            var coverFrame = new Border
+            {
+                Width = 120, Height = 80,
+                Background = new SolidColorBrush(Color.FromRgb(0x2A, 0x2F, 0x38)),
+                CornerRadius = new CornerRadius(4),
+                ClipToBounds = true,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            var coverPanel = new Panel();
+            coverPanel.Children.Add(new TextBlock
+            {
+                Text = "🌐",
+                FontSize = 24,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Opacity = 0.55,
+            });
+            var coverImage = new Image { Stretch = Stretch.UniformToFill };
+            coverImage.Bind(Image.SourceProperty, new Binding(nameof(CatalogRow.Cover)));
+            coverPanel.Children.Add(coverImage);
+            coverFrame.Child = coverPanel;
+
             var titleGrid = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
             var title = new TextBlock
             {
@@ -164,7 +188,23 @@ public sealed class ModHubView : UserControl
                 Converter = new JoinConverter(),
             });
 
-            return new StackPanel { Spacing = 2, Margin = new Thickness(6), Children = { titleGrid, meta } };
+            var textStack = new StackPanel
+            {
+                Spacing = 2,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(12, 0, 0, 0),
+                Children = { titleGrid, meta },
+            };
+            var grid = new Grid
+            {
+                ColumnDefinitions = new ColumnDefinitions("Auto,*"),
+                Margin = new Thickness(6),
+            };
+            Grid.SetColumn(coverFrame, 0);
+            Grid.SetColumn(textStack, 1);
+            grid.Children.Add(coverFrame);
+            grid.Children.Add(textStack);
+            return grid;
         }, supportsRecycling: true);
 
         var status = new TextBlock { Margin = new Thickness(0, 8, 0, 0), Opacity = 0.85 };

@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "id": "kroste.ls25",
+  "displayName": "Landwirtschafts-Simulator 25",
+  "version": "0.1.0",
+  "author": "Kroste",
+  "description": "Mod-Manager für den Landwirtschafts-Simulator 25 (FS25). Extraktion des LS-ModManager-Kerns: modDesc-Reader, ZIP-Install/Enable/Disable/Uninstall im Mods-Ordner (Proton-User-Docs unter Linux, Documents/My Games/FarmingSimulator2025 unter Windows). Katalog-Anbindung (ModHub, Hof Hirschfeld, modhoster), KI-Zusammenfassungen und Backup folgen in späteren Versionen.",
+  "assembly": "ModManager.Plugins.LS25.dll",
+  "entryType": "ModManager.Plugins.LS25.Ls25Plugin",
+  "minHostVersion": "0.2.0",
+  "targets": [
+    {
+      "gameId": "farming-simulator-25",
+      "displayName": "Farming Simulator 25",
+      "steamAppId": 2300320,
+      "alternativeExecutableNames": ["FarmingSimulator2025.exe"],
+      "platforms": "Both"
+    }
+  ],
+  "updateSource": {
+    "kind": "github",
+    "repo": "Kroste/ModManager.Plugins.LS25"
+  }
+}

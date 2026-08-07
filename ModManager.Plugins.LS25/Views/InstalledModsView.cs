@@ -46,6 +46,18 @@ public sealed class InstalledModsView : UserControl
         toolbar.Children.Add(toggleBtn);
         toolbar.Children.Add(uninstallBtn);
 
+        toolbar.Children.Add(new Rectangle
+        {
+            Width = 1, Fill = new SolidColorBrush(Color.FromRgb(0x2E, 0x34, 0x3C)),
+            Margin = new Thickness(6, 4),
+        });
+        var backupBtn = new Button { Content = "💾  Backup" };
+        backupBtn.Bind(Button.CommandProperty, new Binding(nameof(InstalledModsViewModel.CreateBackupCommand)));
+        var restoreBtn = new Button { Content = "♻  Restore…" };
+        restoreBtn.Bind(Button.CommandProperty, new Binding(nameof(InstalledModsViewModel.RestoreBackupCommand)));
+        toolbar.Children.Add(backupBtn);
+        toolbar.Children.Add(restoreBtn);
+
         var pathLabel = new TextBlock
         {
             Opacity = 0.6,

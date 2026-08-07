@@ -8,6 +8,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ModManager.PluginContracts;
 using ModManager.Plugins.LS25.Services;
+using ModManager.Plugins.LS25.Services.Ai;
 using NLog;
 
 namespace ModManager.Plugins.LS25.Views;
@@ -28,6 +29,7 @@ public sealed partial class ModHubViewModel : ObservableObject
     private readonly ModhosterCatalogService _modhoster;
     private readonly CatalogCache _cache;
     private readonly ModInstallService _installer;
+    private readonly Func<IAiProvider?> _aiFactory;
     private readonly IHostServices _host;
 
     private readonly List<ModHubEntry> _allEntries = new();
@@ -36,13 +38,14 @@ public sealed partial class ModHubViewModel : ObservableObject
 
     public ModHubViewModel(ModHubService hub, HofHirschfeldCatalogService hof,
         ModhosterCatalogService modhoster, CatalogCache cache,
-        ModInstallService installer, IHostServices host)
+        ModInstallService installer, Func<IAiProvider?> aiFactory, IHostServices host)
     {
         _hub = hub;
         _hof = hof;
         _modhoster = modhoster;
         _cache = cache;
         _installer = installer;
+        _aiFactory = aiFactory;
         _host = host;
 
         Categories = new ObservableCollection<ModHubCategory>
@@ -86,11 +89,27 @@ public sealed partial class ModHubViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasSelection))]
     [NotifyPropertyChangedFor(nameof(CanDownloadSelected))]
     [NotifyPropertyChangedFor(nameof(SelectionNeedsBrowser))]
+    [NotifyPropertyChangedFor(nameof(CanSummarizeSelected))]
     private CatalogRow? _selected;
 
     public bool HasSelection => Selected is not null;
     public bool CanDownloadSelected => Selected?.Source.CanInAppDownload == true;
     public bool SelectionNeedsBrowser => Selected is not null && !Selected.Source.CanInAppDownload;
+
+    /// <summary>KI-Zusammenfassung braucht die Detail-Beschreibung. Aktuell nur
+    /// bei GIANTS-Rows verfügbar — modhoster/Hof Hirschfeld haben keinen HTTP-
+    /// abgreifbaren Description-Text (Login-Pflicht bzw. Consent-Overlay).</summary>
+    public bool CanSummarizeSelected =>
+        Selected?.Source.Source == ModHubEntry.GiantsSource;
+
+    [ObservableProperty]
+    private string _summaryText = string.Empty;
+
+    [ObservableProperty]
+    private bool _summaryVisible;
+
+    [ObservableProperty]
+    private bool _summaryBusy;
 
     partial void OnSearchTextChanged(string value) => ApplyFilter();
     partial void OnSelectedCategoryChanged(ModHubCategory? value) => ApplyFilter();
@@ -292,6 +311,65 @@ public sealed partial class ModHubViewModel : ObservableObject
     {
         if (Selected is null) return;
         _host.Shell.OpenExternalUrl(Selected.Source.DetailUrl);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanSummarizeSelected))]
+    private async Task SummarizeSelectedAsync()
+    {
+        if (Selected is null) return;
+        var ai = _aiFactory();
+        if (ai is null)
+        {
+            _host.Notifications.Notify(
+                "Ollama nicht konfiguriert — bitte im Einstellungen-Tab Endpoint/Modell setzen.",
+                NotificationLevel.Warning);
+            return;
+        }
+
+        var modIdMatch = System.Text.RegularExpressions.Regex.Match(
+            Selected.Source.DetailUrl, @"mod_id=(\d+)");
+        if (!modIdMatch.Success) return;
+        int modId = int.Parse(modIdMatch.Groups[1].Value);
+
+        SummaryVisible = true;
+        SummaryBusy = true;
+        SummaryText = $"Lade Detail-Beschreibung für \"{Selected.Source.Title}\" …";
+        try
+        {
+            var detail = await _hub.FetchModDetailAsync(modId, Language);
+            if (detail is null || string.IsNullOrWhiteSpace(detail.DescriptionText))
+            {
+                SummaryText = "Keine Beschreibung im Detail-Endpoint gefunden.";
+                return;
+            }
+
+            SummaryText = $"KI-Zusammenfassung wird erstellt via {ai.Name} …";
+            var systemPrompt = "Du bist ein deutschsprachiger LS25-Mod-Reviewer. " +
+                "Fasse die Mod-Beschreibung in 3–5 Sätzen zusammen: " +
+                "Was macht der Mod? Welche Fahrzeuge/Objekte/Features? Zielgruppe? " +
+                "Kein Werbe-Sprech, sachlich.";
+            var userPrompt = $"Titel: {detail.Title}\nAutor: {detail.Author}\n\nBeschreibung:\n{detail.DescriptionText}";
+            var answer = await ai.CompleteAsync(systemPrompt, userPrompt);
+            SummaryText = string.IsNullOrWhiteSpace(answer)
+                ? "KI hat keine Antwort geliefert."
+                : answer;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(ex, "Summarize fehlgeschlagen für Mod {Id}", modId);
+            SummaryText = $"Fehler: {ex.Message}";
+        }
+        finally
+        {
+            SummaryBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private void CloseSummary()
+    {
+        SummaryVisible = false;
+        SummaryText = string.Empty;
     }
 }
 

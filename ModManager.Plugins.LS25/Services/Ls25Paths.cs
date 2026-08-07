@@ -14,6 +14,26 @@ public sealed class Ls25Paths
 
     public Ls25Paths(IHostServices host) => _host = host;
 
+    /// <summary>Persistenter Ordner für Plugin-Konfiguration (settings.json etc.).
+    /// Direct-Passthrough des Host-Werts — im Gegensatz zu Cache-Ordnern
+    /// bleibt dieser bei App-Uninstall NICHT weg (User-Config).</summary>
+    public string PluginDataDir => _host.PluginDataDir;
+
+    /// <summary>Backup-Ordner für Mod-Konfigurations-Snapshots. Liegt bewusst
+    /// im PluginDataDir (persistent), nicht im Cache — Backups sollen einen
+    /// Cache-Wipe überleben. User kann von hier auf Nextcloud/USB-Stick
+    /// kopieren; ein Save-File-Picker kommt in v0.5.1 mit einem
+    /// IDialogService.PickSaveFileAsync-Contract-Bump.</summary>
+    public string BackupsDir
+    {
+        get
+        {
+            var dir = Path.Combine(_host.PluginDataDir, "backups");
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
+    }
+
     /// <summary>Persistenter Ordner für heruntergeladene, noch nicht installierte
     /// Mod-ZIPs. In User-Cache, damit Deinstallation der App ihn nicht sofort
     /// wegräumt.</summary>

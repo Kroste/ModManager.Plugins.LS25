@@ -1,5 +1,6 @@
 using System;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -12,11 +13,16 @@ namespace ModManager.Plugins.LS25.Views;
 public sealed partial class InstalledModsViewModel : ObservableObject
 {
     private readonly ModInstallService _installer;
+    private readonly ModBackupService _backup;
+    private readonly Ls25Paths _paths;
     private readonly IHostServices _host;
 
-    public InstalledModsViewModel(ModInstallService installer, IHostServices host)
+    public InstalledModsViewModel(ModInstallService installer, ModBackupService backup,
+        Ls25Paths paths, IHostServices host)
     {
         _installer = installer;
+        _backup = backup;
+        _paths = paths;
         _host = host;
         ModsDir = installer.ModsDir;
         RefreshCommand.Execute(null);
@@ -128,6 +134,76 @@ public sealed partial class InstalledModsViewModel : ObservableObject
 
     [RelayCommand]
     private void OpenModsFolder() => _host.Shell.OpenDirectory(ModsDir);
+
+    [RelayCommand]
+    private async Task CreateBackupAsync()
+    {
+        if (Mods.Count == 0)
+        {
+            _host.Notifications.Notify("Keine Mods vorhanden — nichts zu sichern.", NotificationLevel.Warning);
+            return;
+        }
+        var timestamp = DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
+        var target = Path.Combine(_paths.BackupsDir, $"ls25-backup-{timestamp}.zip");
+        using var scope = _host.BeginProgress("Backup erstellen …");
+        var progress = new Progress<BackupProgress>(p =>
+            scope.Report(p.Fraction, $"{p.Current}/{p.Total} · {p.CurrentFileName}"));
+        try
+        {
+            var result = await _backup.CreateBackupAsync(target, progress);
+            _host.Notifications.Notify(
+                $"Backup: {result.ModCount} Mods · {FormatBytes(result.FileSizeBytes)} → {Path.GetFileName(result.FilePath)}",
+                NotificationLevel.Success);
+            _host.Shell.OpenDirectory(_paths.BackupsDir);
+        }
+        catch (Exception ex)
+        {
+            _host.Logger.Warn(ex, "LS25: Backup fehlgeschlagen");
+            _host.Notifications.Notify($"Backup-Fehler: {ex.Message}", NotificationLevel.Error);
+        }
+    }
+
+    [RelayCommand]
+    private async Task RestoreBackupAsync()
+    {
+        var picked = await _host.Dialogs.PickFileAsync(
+            "Backup-ZIP wählen",
+            ("LS25-Backup (.zip)", new[] { "*.zip" }));
+        if (picked is null) return;
+
+        // Preview: Manifest zeigen bevor der Restore läuft.
+        BackupManifest manifest;
+        try { manifest = ModBackupService.ReadManifest(picked); }
+        catch (Exception ex)
+        {
+            _host.Notifications.Notify($"Backup ungültig: {ex.Message}", NotificationLevel.Error);
+            return;
+        }
+
+        var confirm = await _host.Dialogs.ConfirmAsync(
+            "Backup wiederherstellen",
+            $"Backup vom {manifest.CreatedUtc.ToLocalTime():g} · {manifest.Mods.Count} Mods.\n" +
+            "Vorhandene Mod-ZIPs mit gleichem Namen werden überschrieben.\nFortfahren?",
+            okLabel: "Wiederherstellen", cancelLabel: "Abbrechen");
+        if (!confirm) return;
+
+        using var scope = _host.BeginProgress("Backup wiederherstellen …");
+        var progress = new Progress<BackupProgress>(p =>
+            scope.Report(p.Fraction, $"{p.Current}/{p.Total} · {p.CurrentFileName}"));
+        try
+        {
+            var result = await _backup.RestoreBackupAsync(picked, progress);
+            _host.Notifications.Notify(
+                $"Restore: {result.RestoredCount} wiederhergestellt, {result.SkippedCount} übersprungen.",
+                NotificationLevel.Success);
+            Refresh();
+        }
+        catch (Exception ex)
+        {
+            _host.Logger.Warn(ex, "LS25: Restore fehlgeschlagen");
+            _host.Notifications.Notify($"Restore-Fehler: {ex.Message}", NotificationLevel.Error);
+        }
+    }
 
     private static string FormatBytes(long bytes)
     {

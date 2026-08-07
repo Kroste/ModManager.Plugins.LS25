@@ -58,6 +58,11 @@ public sealed class ModHubView : UserControl
         var detailBtn = new Button { Content = "🌐  Detail im Browser" };
         detailBtn.Bind(Button.CommandProperty, new Binding(nameof(ModHubViewModel.OpenDetailInBrowserCommand)));
 
+        // KI-Zusammenfassung — nur bei GIANTS aktiv (Detail-Endpoint verfügbar).
+        var summarizeBtn = new Button { Content = "🤖  Zusammenfassen" };
+        summarizeBtn.Bind(Button.CommandProperty, new Binding(nameof(ModHubViewModel.SummarizeSelectedCommand)));
+        summarizeBtn.Bind(Button.IsVisibleProperty, new Binding(nameof(ModHubViewModel.CanSummarizeSelected)));
+
         var toolbar = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -75,6 +80,7 @@ public sealed class ModHubView : UserControl
         });
         toolbar.Children.Add(downloadBtn);
         toolbar.Children.Add(detailBtn);
+        toolbar.Children.Add(summarizeBtn);
 
         var hint = new TextBlock
         {
@@ -164,6 +170,47 @@ public sealed class ModHubView : UserControl
         var status = new TextBlock { Margin = new Thickness(0, 8, 0, 0), Opacity = 0.85 };
         status.Bind(TextBlock.TextProperty, new Binding(nameof(ModHubViewModel.Status)));
 
+        // Summary-Panel für KI-Zusammenfassung, dockt oben an die Liste. Sichtbar
+        // via SummaryVisible-Flag; Close-Button setzt es zurück.
+        var summaryHeader = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+        };
+        summaryHeader.Children.Add(new TextBlock
+        {
+            Text = "🤖  KI-Zusammenfassung",
+            FontWeight = FontWeight.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        var closeBtn = new Button { Content = "✕", Padding = new Thickness(8, 2) };
+        closeBtn.Bind(Button.CommandProperty, new Binding(nameof(ModHubViewModel.CloseSummaryCommand)));
+        summaryHeader.Children.Add(closeBtn);
+
+        var summaryText = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 6, 0, 0),
+            LineHeight = 20,
+        };
+        summaryText.Bind(TextBlock.TextProperty, new Binding(nameof(ModHubViewModel.SummaryText)));
+
+        var summaryPanel = new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(0x24, 0x2A, 0x33)),
+            BorderThickness = new Thickness(1),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0x2E, 0x34, 0x3C)),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(14, 10),
+            Margin = new Thickness(0, 0, 0, 10),
+            Child = new StackPanel
+            {
+                Spacing = 4,
+                Children = { summaryHeader, summaryText },
+            },
+        };
+        summaryPanel.Bind(Border.IsVisibleProperty, new Binding(nameof(ModHubViewModel.SummaryVisible)));
+
         Content = new DockPanel
         {
             Margin = new Thickness(20),
@@ -171,6 +218,7 @@ public sealed class ModHubView : UserControl
             {
                 Make(toolbar, DockPanel.DockProperty, Dock.Top),
                 Make(hint, DockPanel.DockProperty, Dock.Top),
+                Make(summaryPanel, DockPanel.DockProperty, Dock.Top),
                 Make(status, DockPanel.DockProperty, Dock.Bottom),
                 list,
             },

@@ -48,15 +48,18 @@ jobs:
           -p:Version=${{ steps.ver.outputs.v }}
 
       - name: Plugin-Bundle packen (Plugin-DLL + plugin.json + plugin-eigene Deps)
-        # Alles aus bin/ AUSSER .pdb und .deps.json. Die csproj ist so
-        # konfiguriert dass Host-Assemblies (Kroste.ModManager.PluginContracts,
+        # Alles aus bin/ AUSSER .pdb + .xml + .deps.json — REKURSIV, sonst
+        # bleiben die 250 MB großen SkiaSharp-Windows-PDBs unter
+        # runtimes/win-*/native/ drin. `rm -f bundle/*.pdb` fängt nur die
+        # erste Ebene, `find … -delete` alle Tiefen.
+        # Die csproj ist so konfiguriert dass Host-Assemblies (Kroste.*,
         # Avalonia*, CommunityToolkit.Mvvm) gar nicht im Output landen —
-        # deshalb ist alles was hier ist echte Plugin-Runtime-Dep
-        # (HtmlAgilityPack.dll, Pfim.dll, SkiaSharp.dll, runtimes/ inkl. native libs).
+        # alles was hier ist, ist echte Plugin-Runtime-Dep (HtmlAgilityPack,
+        # Pfim, SkiaSharp inkl. runtimes/ native libs).
         run: |
           mkdir -p bundle
           cp -r ModManager.Plugins.LS25/bin/Release/net10.0/. bundle/
-          rm -f bundle/*.pdb bundle/*.deps.json
+          find bundle -type f \( -name '*.pdb' -o -name '*.xml' -o -name '*.deps.json' \) -delete
           cd bundle
           zip -r "../ModManager.Plugins.LS25-${{ steps.ver.outputs.v }}.zip" .
 

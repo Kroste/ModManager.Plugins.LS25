@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using ModManager.PluginContracts;
 using ModManager.Plugins.LS25.Services;
-using ModManager.Plugins.LS25.Services.Ai;
 using ModManager.Plugins.LS25.Views;
 
 namespace ModManager.Plugins.LS25;
@@ -15,9 +14,9 @@ public sealed class Ls25Plugin : IGameModPlugin
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.ls25",
         DisplayName: "Landwirtschafts-Simulator 25",
-        Version: "0.8.0",
+        Version: "0.9.0",
         Author: "Kroste",
-        Description: "Mod-Manager für Farming Simulator 25 — Kroste-Card-Look. Per-Row-Buttons (Update/Toggle/Uninstall bzw. Install/Löschen), Cover in Downloads-Tab, INSTALLIERT- und ⭐ EMPFOHLEN-Badges. Spielstart via Steam, Mod-Updates, Detail-Dialog, aggregierter ModHub, Backup/Restore.");
+        Description: "Mod-Manager für Farming Simulator 25 — Kroste-Card-Look. Per-Row-Buttons, Cover, INSTALLIERT- und ⭐ EMPFOHLEN-Badges, Spielstart via Steam, Mod-Updates, Detail-Dialog, aggregierter ModHub, Backup/Restore, KI-Zusammenfassung über zentralen Host-Provider (IHostServices.Ai).");
 
     public IReadOnlyList<GameTarget> Targets { get; } = new[]
     {
@@ -70,18 +69,6 @@ public sealed class Ls25Plugin : IGameModPlugin
         return Task.CompletedTask;
     }
 
-    /// <summary>Baut on-demand einen konfigurierten Ollama-Provider aus den
-    /// persistierten Settings. Gibt null zurück wenn Endpoint oder Modell
-    /// leer sind (User hat noch nicht konfiguriert).</summary>
-    private IAiProvider? CreateAiProviderFromSettings()
-    {
-        if (_settings is null || _host is null) return null;
-        var s = _settings.Current;
-        if (string.IsNullOrWhiteSpace(s.OllamaEndpoint) || string.IsNullOrWhiteSpace(s.OllamaModel))
-            return null;
-        return new OllamaProvider(_host.CreateHttpClient("ollama"), s.OllamaEndpoint, s.OllamaModel);
-    }
-
     public IEnumerable<IGameTabContribution> GetTabContributions(DetectedGame game)
     {
         if (!_installers.TryGetValue(game.Target.GameId, out var installer) || _host is null
@@ -92,9 +79,8 @@ public sealed class Ls25Plugin : IGameModPlugin
 
         yield return new InstalledTab(installer, backup, _previews, _hub, _cache, _paths, _host);
         yield return new ModHubTab(_hub, _hofHirschfeld, _modhoster, _cache, installer,
-            _previews, _settings, _downloadBus, CreateAiProviderFromSettings, _host);
+            _previews, _settings, _downloadBus, _host);
         yield return new DownloadsTab(installer, _previews, _downloadBus, _host);
-        yield return new SettingsTab(_settings, _host);
     }
 
     public Task ShutdownAsync()
@@ -138,21 +124,20 @@ public sealed class Ls25Plugin : IGameModPlugin
         private readonly ModPreviewService _previews;
         private readonly Ls25SettingsService _settings;
         private readonly DownloadEventBus _downloadBus;
-        private readonly Func<IAiProvider?> _aiFactory;
         private readonly IHostServices _host;
         public ModHubTab(ModHubService hub, HofHirschfeldCatalogService hof,
             ModhosterCatalogService modhoster, CatalogCache cache,
             ModInstallService installer, ModPreviewService previews,
             Ls25SettingsService settings, DownloadEventBus downloadBus,
-            Func<IAiProvider?> aiFactory, IHostServices host)
-        { _hub = hub; _hof = hof; _modhoster = modhoster; _cache = cache; _installer = installer; _previews = previews; _settings = settings; _downloadBus = downloadBus; _aiFactory = aiFactory; _host = host; }
+            IHostServices host)
+        { _hub = hub; _hof = hof; _modhoster = modhoster; _cache = cache; _installer = installer; _previews = previews; _settings = settings; _downloadBus = downloadBus; _host = host; }
         public string Id => "modhub";
         public string Label => "ModHub";
         public string Icon => "\U0001F3EA"; // 🏪
         public int Order => 10;
         public bool IsVisible(DetectedGame game) => true;
         public Control CreateView(DetectedGame game, IHostServices host) =>
-            new ModHubView { DataContext = new ModHubViewModel(_hub, _hof, _modhoster, _cache, _installer, _previews, _settings, _downloadBus, _aiFactory, _host) };
+            new ModHubView { DataContext = new ModHubViewModel(_hub, _hof, _modhoster, _cache, _installer, _previews, _settings, _downloadBus, _host) };
     }
 
     private sealed class DownloadsTab : IGameTabContribution
@@ -171,27 +156,5 @@ public sealed class Ls25Plugin : IGameModPlugin
         public bool IsVisible(DetectedGame game) => true;
         public Control CreateView(DetectedGame game, IHostServices host) =>
             new DownloadsView { DataContext = new DownloadsViewModel(_installer, _previews, _downloadBus, _host) };
-    }
-
-    private sealed class SettingsTab : IGameTabContribution
-    {
-        private readonly Ls25SettingsService _settings;
-        private readonly IHostServices _host;
-        public SettingsTab(Ls25SettingsService settings, IHostServices host)
-        { _settings = settings; _host = host; }
-        public string Id => "settings";
-        public string Label => "Einstellungen";
-        public string Icon => "⚙"; // ⚙
-        public int Order => 30;
-        public bool IsVisible(DetectedGame game) => true;
-        public Control CreateView(DetectedGame game, IHostServices host)
-        {
-            // Ephemere Factory pro Test-Klick — Endpoint aus dem VM-Feld,
-            // nicht aus Settings, damit der Test die noch nicht gespeicherten
-            // Werte prüft.
-            Func<string, IAiProvider> providerFactory = endpoint =>
-                new OllamaProvider(_host.CreateHttpClient("ollama-test"), endpoint, _settings.Current.OllamaModel);
-            return new SettingsView { DataContext = new SettingsViewModel(_settings, providerFactory, _host) };
-        }
     }
 }

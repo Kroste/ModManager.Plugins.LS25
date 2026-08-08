@@ -8,7 +8,6 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ModManager.PluginContracts;
 using ModManager.Plugins.LS25.Services;
-using ModManager.Plugins.LS25.Services.Ai;
 using NLog;
 
 namespace ModManager.Plugins.LS25.Views;
@@ -27,7 +26,6 @@ public sealed partial class ModDetailViewModel : ObservableObject
 
     private readonly ModHubService _hub;
     private readonly ModPreviewService _previews;
-    private readonly Func<IAiProvider?> _aiFactory;
     private readonly IHostServices _host;
     private readonly int _modId;
     private readonly string _fallbackTitle;
@@ -38,12 +36,11 @@ public sealed partial class ModDetailViewModel : ObservableObject
 
     public ModDetailViewModel(int modId, CatalogRow row,
         ModHubService hub, ModPreviewService previews,
-        Func<IAiProvider?> aiFactory, IHostServices host)
+        IHostServices host)
     {
         _modId = modId;
         _hub = hub;
         _previews = previews;
-        _aiFactory = aiFactory;
         _host = host;
 
         _fallbackTitle = row.Source.Title;
@@ -173,21 +170,20 @@ public sealed partial class ModDetailViewModel : ObservableObject
     [RelayCommand]
     private async Task SummarizeAsync()
     {
-        var ai = _aiFactory();
-        if (ai is null)
-        {
-            _host.Notifications.Notify(
-                "Ollama nicht konfiguriert — Einstellungen-Tab.",
-                NotificationLevel.Warning);
-            return;
-        }
         if (string.IsNullOrWhiteSpace(Description) || IsLoading)
         {
             _host.Notifications.Notify("Bitte warten bis Detail geladen ist.", NotificationLevel.Info);
             return;
         }
+        if (!await _host.Ai.IsAvailableAsync())
+        {
+            _host.Notifications.Notify(
+                "KI-Provider nicht erreichbar — bitte in den ModManager-Einstellungen konfigurieren.",
+                NotificationLevel.Warning);
+            return;
+        }
         SummaryBusy = true;
-        SummaryText = $"KI-Zusammenfassung via {ai.Name} …";
+        SummaryText = $"KI-Zusammenfassung via {_host.Ai.ProviderInfo} …";
         try
         {
             var systemPrompt = "Du bist ein deutschsprachiger LS25-Mod-Reviewer. " +
@@ -195,7 +191,7 @@ public sealed partial class ModDetailViewModel : ObservableObject
                 "Was macht der Mod? Welche Fahrzeuge/Objekte/Features? Zielgruppe? " +
                 "Kein Werbe-Sprech, sachlich.";
             var userPrompt = $"Titel: {Title}\nAutor: {Author}\n\nBeschreibung:\n{Description}";
-            var answer = await ai.CompleteAsync(systemPrompt, userPrompt);
+            var answer = await _host.Ai.CompleteAsync(systemPrompt, userPrompt);
             SummaryText = string.IsNullOrWhiteSpace(answer) ? "KI hat keine Antwort geliefert." : answer;
         }
         catch (Exception ex)

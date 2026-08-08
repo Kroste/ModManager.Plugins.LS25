@@ -12,7 +12,6 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ModManager.PluginContracts;
 using ModManager.Plugins.LS25.Services;
-using ModManager.Plugins.LS25.Services.Ai;
 using NLog;
 
 namespace ModManager.Plugins.LS25.Views;
@@ -36,7 +35,6 @@ public sealed partial class ModHubViewModel : ObservableObject
     private readonly ModPreviewService _previews;
     private readonly Ls25SettingsService _settings;
     private readonly DownloadEventBus _downloadBus;
-    private readonly Func<IAiProvider?> _aiFactory;
     private readonly IHostServices _host;
 
     private readonly List<ModHubEntry> _allEntries = new();
@@ -47,7 +45,7 @@ public sealed partial class ModHubViewModel : ObservableObject
         ModhosterCatalogService modhoster, CatalogCache cache,
         ModInstallService installer, ModPreviewService previews,
         Ls25SettingsService settings, DownloadEventBus downloadBus,
-        Func<IAiProvider?> aiFactory, IHostServices host)
+        IHostServices host)
     {
         _hub = hub;
         _hof = hof;
@@ -57,7 +55,6 @@ public sealed partial class ModHubViewModel : ObservableObject
         _previews = previews;
         _settings = settings;
         _downloadBus = downloadBus;
-        _aiFactory = aiFactory;
         _host = host;
 
         Categories = new ObservableCollection<ModHubCategory>
@@ -506,7 +503,7 @@ public sealed partial class ModHubViewModel : ObservableObject
             _host.Shell.OpenExternalUrl(Selected.Source.DetailUrl);
             return;
         }
-        var vm = new ModDetailViewModel(modId.Value, Selected, _hub, _previews, _aiFactory, _host);
+        var vm = new ModDetailViewModel(modId.Value, Selected, _hub, _previews, _host);
         var window = new ModDetailWindow { DataContext = vm };
         var owner = (Avalonia.Application.Current?.ApplicationLifetime
             as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
@@ -517,11 +514,10 @@ public sealed partial class ModHubViewModel : ObservableObject
     private async Task SummarizeSelectedAsync()
     {
         if (Selected is null) return;
-        var ai = _aiFactory();
-        if (ai is null)
+        if (!await _host.Ai.IsAvailableAsync())
         {
             _host.Notifications.Notify(
-                "Ollama nicht konfiguriert — bitte im Einstellungen-Tab Endpoint/Modell setzen.",
+                "KI-Provider nicht erreichbar — bitte in den ModManager-Einstellungen konfigurieren.",
                 NotificationLevel.Warning);
             return;
         }
@@ -541,13 +537,13 @@ public sealed partial class ModHubViewModel : ObservableObject
                 return;
             }
 
-            SummaryText = $"KI-Zusammenfassung wird erstellt via {ai.Name} …";
+            SummaryText = $"KI-Zusammenfassung wird erstellt via {_host.Ai.ProviderInfo} …";
             var systemPrompt = "Du bist ein deutschsprachiger LS25-Mod-Reviewer. " +
                 "Fasse die Mod-Beschreibung in 3–5 Sätzen zusammen: " +
                 "Was macht der Mod? Welche Fahrzeuge/Objekte/Features? Zielgruppe? " +
                 "Kein Werbe-Sprech, sachlich.";
             var userPrompt = $"Titel: {detail.Title}\nAutor: {detail.Author}\n\nBeschreibung:\n{detail.DescriptionText}";
-            var answer = await ai.CompleteAsync(systemPrompt, userPrompt);
+            var answer = await _host.Ai.CompleteAsync(systemPrompt, userPrompt);
             SummaryText = string.IsNullOrWhiteSpace(answer)
                 ? "KI hat keine Antwort geliefert."
                 : answer;

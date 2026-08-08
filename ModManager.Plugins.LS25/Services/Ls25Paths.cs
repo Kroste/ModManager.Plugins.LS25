@@ -108,7 +108,8 @@ public sealed class Ls25Paths
         catch { /* best-effort */ }
     }
 
-    /// <summary>Extension aus den ersten Bytes der Bild-Daten raten (JPG vs PNG).</summary>
+    /// <summary>Extension aus den ersten Bytes der Bild-Daten raten. Unterstützt
+    /// JPG, PNG und WebP — letzteres liefert modhoster durchgängig.</summary>
     public static string GuessImageExtension(byte[] bytes)
     {
         if (bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
@@ -116,6 +117,11 @@ public sealed class Ls25Paths
         if (bytes.Length >= 8 && bytes[0] == 0x89 && bytes[1] == 0x50 &&
             bytes[2] == 0x4E && bytes[3] == 0x47)
             return ".png";
+        // WebP: „RIFF????WEBP" — 4 Bytes RIFF, 4 Bytes Size, dann WEBP-Marker.
+        if (bytes.Length >= 12 &&
+            bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 &&
+            bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50)
+            return ".webp";
         return ".bin";
     }
 }

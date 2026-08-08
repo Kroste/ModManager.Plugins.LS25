@@ -24,15 +24,31 @@ public sealed partial class DownloadsViewModel : ObservableObject
 {
     private readonly ModInstallService _installer;
     private readonly ModPreviewService _previews;
+    private readonly DownloadEventBus _downloadBus;
     private readonly IHostServices _host;
 
-    public DownloadsViewModel(ModInstallService installer, ModPreviewService previews, IHostServices host)
+    public DownloadsViewModel(ModInstallService installer, ModPreviewService previews,
+        DownloadEventBus downloadBus, IHostServices host)
     {
         _installer = installer;
         _previews = previews;
+        _downloadBus = downloadBus;
         _host = host;
         DownloadsDir = installer.DownloadsDir ?? "(nicht konfiguriert)";
         RefreshCommand.Execute(null);
+
+        // Auto-Refresh: sobald der ModHub-Tab (oder ein anderer Tab) einen
+        // Download in den Downloads-Ordner geschrieben hat, aktualisiert
+        // sich diese Liste automatisch — ohne User-Klick auf Refresh.
+        _downloadBus.DownloadsChanged += (_, fileName) =>
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                Refresh();
+                _host.Notifications.Notify($"Downloads aktualisiert: {fileName}",
+                    NotificationLevel.Info);
+            });
+        };
     }
 
     public string DownloadsDir { get; }

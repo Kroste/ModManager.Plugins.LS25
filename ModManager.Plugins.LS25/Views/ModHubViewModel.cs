@@ -35,6 +35,7 @@ public sealed partial class ModHubViewModel : ObservableObject
     private readonly ModInstallService _installer;
     private readonly ModPreviewService _previews;
     private readonly Ls25SettingsService _settings;
+    private readonly DownloadEventBus _downloadBus;
     private readonly Func<IAiProvider?> _aiFactory;
     private readonly IHostServices _host;
 
@@ -45,7 +46,8 @@ public sealed partial class ModHubViewModel : ObservableObject
     public ModHubViewModel(ModHubService hub, HofHirschfeldCatalogService hof,
         ModhosterCatalogService modhoster, CatalogCache cache,
         ModInstallService installer, ModPreviewService previews,
-        Ls25SettingsService settings, Func<IAiProvider?> aiFactory, IHostServices host)
+        Ls25SettingsService settings, DownloadEventBus downloadBus,
+        Func<IAiProvider?> aiFactory, IHostServices host)
     {
         _hub = hub;
         _hof = hof;
@@ -54,6 +56,7 @@ public sealed partial class ModHubViewModel : ObservableObject
         _installer = installer;
         _previews = previews;
         _settings = settings;
+        _downloadBus = downloadBus;
         _aiFactory = aiFactory;
         _host = host;
 
@@ -433,6 +436,7 @@ public sealed partial class ModHubViewModel : ObservableObject
                 return;
             }
             _host.Notifications.Notify($"Heruntergeladen: {result.FileName}", NotificationLevel.Success);
+            _downloadBus.RaiseDownloadsChanged(result.FileName);
         }
         catch (Exception ex)
         {

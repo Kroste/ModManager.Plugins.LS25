@@ -97,7 +97,7 @@ public sealed class ModPreviewService
     {
         if (string.IsNullOrWhiteSpace(url)) return null;
         var basePath = Path.Combine(_paths.PreviewsCacheDir, "catalog_" + CacheKeyFor(url));
-        foreach (var ext in new[] { ".jpg", ".jpeg", ".png" })
+        foreach (var ext in new[] { ".jpg", ".jpeg", ".png", ".webp" })
         {
             var candidate = basePath + ext;
             if (File.Exists(candidate)) return candidate;
@@ -113,7 +113,7 @@ public sealed class ModPreviewService
         if (string.IsNullOrWhiteSpace(url)) return null;
 
         var basePath = Path.Combine(_paths.PreviewsCacheDir, "catalog_" + CacheKeyFor(url));
-        foreach (var ext in new[] { ".jpg", ".jpeg", ".png" })
+        foreach (var ext in new[] { ".jpg", ".jpeg", ".png", ".webp" })
         {
             var candidate = basePath + ext;
             if (File.Exists(candidate)) return candidate;

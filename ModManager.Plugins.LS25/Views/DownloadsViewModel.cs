@@ -1,7 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Avalonia.Media.Imaging;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ModManager.PluginContracts;
@@ -9,14 +13,23 @@ using ModManager.Plugins.LS25.Services;
 
 namespace ModManager.Plugins.LS25.Views;
 
+/// <summary>
+/// Downloads-Tab-VM. Zeigt bereits heruntergeladene ZIPs mit Preview aus dem
+/// ZIP (analog Installiert-Tab, via <see cref="ModPreviewService"/>). Row-
+/// basierte Commands (InstallRow, DeleteRow) für Klick auf Kachel-Button
+/// ohne vorherige Selection. IsInstalled-Flag per Filename-Fuzzy-Match gegen
+/// die installierten Mods → grünes „✓ INSTALLIERT"-Badge.
+/// </summary>
 public sealed partial class DownloadsViewModel : ObservableObject
 {
     private readonly ModInstallService _installer;
+    private readonly ModPreviewService _previews;
     private readonly IHostServices _host;
 
-    public DownloadsViewModel(ModInstallService installer, IHostServices host)
+    public DownloadsViewModel(ModInstallService installer, ModPreviewService previews, IHostServices host)
     {
         _installer = installer;
+        _previews = previews;
         _host = host;
         DownloadsDir = installer.DownloadsDir ?? "(nicht konfiguriert)";
         RefreshCommand.Execute(null);
@@ -43,9 +56,18 @@ public sealed partial class DownloadsViewModel : ObservableObject
         Rows.Clear();
         try
         {
-            foreach (var m in _installer.ListDownloaded()
-                         .OrderByDescending(m => m.InstalledUtc))
-                Rows.Add(new ModRow(m));
+            var downloaded = _installer.ListDownloaded()
+                .OrderByDescending(m => m.InstalledUtc).ToList();
+            var installedNames = new HashSet<string>(
+                _installer.ListInstalled().Select(m => Normalize(m.FileName)),
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (var m in downloaded)
+            {
+                var row = new ModRow(m);
+                row.IsAlreadyInstalled = installedNames.Contains(Normalize(m.FileName));
+                Rows.Add(row);
+            }
 
             var totalBytes = Rows.Sum(r => r.Source.FileSizeBytes);
             Summary = Rows.Count == 0
@@ -57,15 +79,52 @@ public sealed partial class DownloadsViewModel : ObservableObject
             _host.Logger.Warn(ex, "LS25 Downloads-Liste konnte nicht geladen werden");
             Summary = "Fehler beim Lesen des Downloads-Ordners.";
         }
+        _ = LoadPreviewsAsync(Rows.ToArray());
+    }
+
+    private async Task LoadPreviewsAsync(ModRow[] rows)
+    {
+        foreach (var row in rows)
+        {
+            try
+            {
+                var path = await _previews.GetOrExtractInstalledPreviewAsync(row.Source.FilePath);
+                if (path is null || !File.Exists(path)) continue;
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    try
+                    {
+                        using var s = File.OpenRead(path);
+                        row.Preview = new Bitmap(s);
+                    }
+                    catch (Exception ex) { _host.Logger.Warn(ex, "Downloads-Preview-Bitmap {p}", path); }
+                });
+            }
+            catch (Exception ex) { _host.Logger.Debug(ex, "Downloads-Preview-Extract {p}", row.Source.FilePath); }
+        }
+    }
+
+    /// <summary>Filename-Normalisierung für Fuzzy-Compare Downloads ↔ Installiert.
+    /// Suffixe .zip/.disabled abschneiden, lowercase, damit sich der Vergleich
+    /// robust gegen aktive/inaktive Varianten verhält.</summary>
+    private static string Normalize(string fn)
+    {
+        var s = fn.ToLowerInvariant();
+        if (s.EndsWith(".disabled")) s = s.Substring(0, s.Length - ".disabled".Length);
+        if (s.EndsWith(".zip")) s = s.Substring(0, s.Length - ".zip".Length);
+        return s;
     }
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
-    private void InstallSelected()
+    private void InstallSelected() => InstallRow(Selected);
+
+    [RelayCommand]
+    private void InstallRow(ModRow? row)
     {
-        if (Selected is null) return;
+        if (row is null) return;
         try
         {
-            var installed = _installer.Install(Selected.Source.FilePath, overwrite: false);
+            var installed = _installer.Install(row.Source.FilePath, overwrite: false);
             _host.Notifications.Notify($"Installiert: {installed.FileName}", NotificationLevel.Success);
             Refresh();
         }
@@ -77,18 +136,21 @@ public sealed partial class DownloadsViewModel : ObservableObject
     }
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
-    private async Task DeleteSelectedAsync()
+    private async Task DeleteSelectedAsync() => await DeleteRowAsync(Selected);
+
+    [RelayCommand]
+    private async Task DeleteRowAsync(ModRow? row)
     {
-        if (Selected is null) return;
+        if (row is null) return;
         bool ok = await _host.Dialogs.ConfirmAsync(
             "Download löschen",
-            $"„{Selected.Source.FileName}“ aus dem Downloads-Ordner löschen?",
+            $"„{row.Source.FileName}“ aus dem Downloads-Ordner löschen?",
             okLabel: "Löschen", cancelLabel: "Abbrechen");
         if (!ok) return;
         try
         {
-            _installer.DeleteDownload(Selected.Source.FilePath);
-            _host.Notifications.Notify($"Gelöscht: {Selected.Source.FileName}", NotificationLevel.Success);
+            _installer.DeleteDownload(row.Source.FilePath);
+            _host.Notifications.Notify($"Gelöscht: {row.Source.FileName}", NotificationLevel.Success);
             Refresh();
         }
         catch (Exception ex)

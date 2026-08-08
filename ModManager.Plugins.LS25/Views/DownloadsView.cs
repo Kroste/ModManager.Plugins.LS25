@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Layout;
@@ -9,8 +10,9 @@ using Avalonia.Media;
 namespace ModManager.Plugins.LS25.Views;
 
 /// <summary>
-/// Downloads-Tab im Kroste-Card-Look. Rows als Cards mit Icon + Titel/Meta +
-/// Aktions-Buttons rechts.
+/// Downloads-Tab im Kroste-Card-Look. Rows als Cards mit Preview-Cover (aus
+/// ZIP extrahiert), Titel + INSTALLIERT-Badge + Meta, rechts Install (accent)
+/// und Löschen (danger) pro Row.
 /// </summary>
 public sealed class DownloadsView : UserControl
 {
@@ -35,19 +37,13 @@ public sealed class DownloadsView : UserControl
         refreshBtn.Bind(Button.CommandProperty, new Binding(nameof(DownloadsViewModel.RefreshCommand)));
         var openBtn = new Button { Content = "📂  Downloads-Ordner" };
         openBtn.Bind(Button.CommandProperty, new Binding(nameof(DownloadsViewModel.OpenDownloadsFolderCommand)));
-        var installBtn = new Button { Content = "📥  Installieren" };
-        installBtn.Classes.Add("accent");
-        installBtn.Bind(Button.CommandProperty, new Binding(nameof(DownloadsViewModel.InstallSelectedCommand)));
-        var deleteBtn = new Button { Content = "🗑  Löschen" };
-        deleteBtn.Classes.Add("danger");
-        deleteBtn.Bind(Button.CommandProperty, new Binding(nameof(DownloadsViewModel.DeleteSelectedCommand)));
 
         return new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 6,
             Margin = new Thickness(0, 0, 0, 10),
-            Children = { refreshBtn, openBtn, installBtn, deleteBtn },
+            Children = { refreshBtn, openBtn },
         };
     }
 
@@ -89,30 +85,66 @@ public sealed class DownloadsView : UserControl
 
     private static Control BuildRowTemplate()
     {
-        var iconFrame = new Border
+        // Cover-Frame 140x90 (Preview aus der ZIP extrahiert).
+        var coverFrame = new Border
         {
-            Width = 60, Height = 60,
+            Width = 140, Height = 90,
             CornerRadius = new CornerRadius(6),
+            ClipToBounds = true,
             [!Border.BackgroundProperty] = new DynamicResourceExtension("KrosteSurfaceBrush"),
         };
-        var icon = new TextBlock
+        var coverPanel = new Panel();
+        var coverFallback = new TextBlock
         {
             Text = "📦",
-            FontSize = 26,
+            FontSize = 32,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        icon.Classes.Add("muted");
-        iconFrame.Child = icon;
+        coverFallback.Classes.Add("muted");
+        coverPanel.Children.Add(coverFallback);
+        var coverImage = new Image
+        {
+            Stretch = Stretch.UniformToFill,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch,
+        };
+        coverImage.Bind(Image.SourceProperty, new Binding(nameof(ModRow.Preview)));
+        coverPanel.Children.Add(coverImage);
+        coverFrame.Child = coverPanel;
 
+        // Titel + INSTALLIERT-Badge
+        var titleRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         var title = new TextBlock
         {
             FontWeight = FontWeight.SemiBold,
             TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
         };
         title.Bind(TextBlock.TextProperty, new Binding(nameof(ModRow.Title)));
+        titleRow.Children.Add(title);
 
-        var meta = new TextBlock { FontSize = 11, Margin = new Thickness(0, 2, 0, 0) };
+        var installedBadge = new Border
+        {
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(8, 1),
+            VerticalAlignment = VerticalAlignment.Center,
+            [!Border.BackgroundProperty] = new DynamicResourceExtension("KrosteSuccessBrush"),
+        };
+        installedBadge.Child = new TextBlock
+        {
+            Text = "✓ INSTALLIERT",
+            FontSize = 10, FontWeight = FontWeight.SemiBold,
+            Foreground = Brushes.White,
+        };
+        installedBadge.Bind(Border.IsVisibleProperty, new Binding(nameof(ModRow.IsAlreadyInstalled)));
+        titleRow.Children.Add(installedBadge);
+
+        // Meta: Author · vX.Y · Größe · FileName
+        var meta = new TextBlock
+        {
+            FontSize = 11, Margin = new Thickness(0, 2, 0, 0),
+        };
         meta.Classes.Add("muted");
         meta.Bind(TextBlock.TextProperty, new MultiBinding
         {
@@ -131,14 +163,42 @@ public sealed class DownloadsView : UserControl
             Spacing = 2,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(14, 0, 0, 0),
-            Children = { title, meta },
+            Children = { titleRow, meta },
         };
 
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
-        Grid.SetColumn(iconFrame, 0);
+        // Row-Buttons rechts: Installieren (accent) + Löschen (danger)
+        var installBtn = new Button { Content = "📥  Installieren" };
+        installBtn.Classes.Add("accent");
+        installBtn.Bind(Button.CommandProperty, new Binding
+        {
+            RelativeSource = new RelativeSource { Mode = RelativeSourceMode.FindAncestor, AncestorType = typeof(ListBox) },
+            Path = "DataContext." + nameof(DownloadsViewModel.InstallRowCommand),
+        });
+        installBtn.Bind(Button.CommandParameterProperty, new Binding("."));
+
+        var deleteBtn = new Button { Content = "🗑  Löschen" };
+        deleteBtn.Classes.Add("danger");
+        deleteBtn.Bind(Button.CommandProperty, new Binding
+        {
+            RelativeSource = new RelativeSource { Mode = RelativeSourceMode.FindAncestor, AncestorType = typeof(ListBox) },
+            Path = "DataContext." + nameof(DownloadsViewModel.DeleteRowCommand),
+        });
+        deleteBtn.Bind(Button.CommandParameterProperty, new Binding("."));
+
+        var actions = new StackPanel
+        {
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children = { installBtn, deleteBtn },
+        };
+
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
+        Grid.SetColumn(coverFrame, 0);
         Grid.SetColumn(textStack, 1);
-        grid.Children.Add(iconFrame);
+        Grid.SetColumn(actions, 2);
+        grid.Children.Add(coverFrame);
         grid.Children.Add(textStack);
+        grid.Children.Add(actions);
 
         var card = new Border { Margin = new Thickness(0, 0, 0, 8), Child = grid };
         card.Classes.Add("card");

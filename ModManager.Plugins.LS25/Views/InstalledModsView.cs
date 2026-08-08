@@ -213,25 +213,34 @@ public sealed class InstalledModsView : UserControl
             Children = { titleRow, meta },
         };
 
-        // Update-Button rechts — nur sichtbar bei HasUpdate.
+        // Row-Aktionen rechts: Update (accent, nur bei HasUpdate) +
+        // (De-)Aktivieren + Deinstallieren.
         var updateBtn = new Button { Content = "⬆  Update" };
         updateBtn.Classes.Add("accent");
-        updateBtn.VerticalAlignment = VerticalAlignment.Center;
-        updateBtn.Bind(Button.CommandProperty, new Binding
-        {
-            RelativeSource = new RelativeSource { Mode = RelativeSourceMode.FindAncestor, AncestorType = typeof(ListBox) },
-            Path = "DataContext." + nameof(InstalledModsViewModel.UpdateModCommand),
-        });
-        updateBtn.Bind(Button.CommandParameterProperty, new Binding("."));
+        BindRowCommand(updateBtn, nameof(InstalledModsViewModel.UpdateModCommand));
         updateBtn.Bind(Button.IsVisibleProperty, new Binding(nameof(ModRow.HasUpdate)));
+
+        var toggleBtn = new Button { Content = "⏻  (De-)Aktivieren" };
+        BindRowCommand(toggleBtn, nameof(InstalledModsViewModel.ToggleEnabledRowCommand));
+
+        var uninstallBtn = new Button { Content = "🗑  Deinstallieren" };
+        uninstallBtn.Classes.Add("danger");
+        BindRowCommand(uninstallBtn, nameof(InstalledModsViewModel.UninstallRowCommand));
+
+        var actions = new StackPanel
+        {
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children = { updateBtn, toggleBtn, uninstallBtn },
+        };
 
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
         Grid.SetColumn(coverFrame, 0);
         Grid.SetColumn(textStack, 1);
-        Grid.SetColumn(updateBtn, 2);
+        Grid.SetColumn(actions, 2);
         grid.Children.Add(coverFrame);
         grid.Children.Add(textStack);
-        grid.Children.Add(updateBtn);
+        grid.Children.Add(actions);
 
         var card = new Border { Margin = new Thickness(0, 0, 0, 8), Child = grid };
         card.Classes.Add("card");
@@ -248,6 +257,18 @@ public sealed class InstalledModsView : UserControl
         var r = new Rectangle();
         r.Classes.Add("divider-v");
         return r;
+    }
+
+    /// <summary>Bindet einen Row-Button-Command auf einen Command in dem
+    /// ListBox-DataContext (VM) und übergibt die Row als Parameter.</summary>
+    private static void BindRowCommand(Button btn, string commandName)
+    {
+        btn.Bind(Button.CommandProperty, new Binding
+        {
+            RelativeSource = new RelativeSource { Mode = RelativeSourceMode.FindAncestor, AncestorType = typeof(ListBox) },
+            Path = "DataContext." + commandName,
+        });
+        btn.Bind(Button.CommandParameterProperty, new Binding("."));
     }
 
     private static Control WithDock(Control c, Dock dock)

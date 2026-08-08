@@ -15,9 +15,9 @@ public sealed class Ls25Plugin : IGameModPlugin
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.ls25",
         DisplayName: "Landwirtschafts-Simulator 25",
-        Version: "0.7.2",
+        Version: "0.7.3",
         Author: "Kroste",
-        Description: "Mod-Manager für Farming Simulator 25 — Kroste-Card-Look. Spielstart via Steam, Mod-Updates prüfen + einspielen, Detail-Dialog mit Screenshots + KI-Summary + Download, aggregierter ModHub, Backup/Restore, Preview (DDS→PNG).");
+        Description: "Mod-Manager für Farming Simulator 25 — Kroste-Card-Look. Per-Row-Buttons (Update/Toggle/Uninstall bzw. Install/Löschen), Cover in Downloads-Tab, INSTALLIERT- und ⭐ EMPFOHLEN-Badges. Spielstart via Steam, Mod-Updates, Detail-Dialog, aggregierter ModHub, Backup/Restore.");
 
     public IReadOnlyList<GameTarget> Targets { get; } = new[]
     {
@@ -91,7 +91,7 @@ public sealed class Ls25Plugin : IGameModPlugin
         yield return new InstalledTab(installer, backup, _previews, _hub, _cache, _paths, _host);
         yield return new ModHubTab(_hub, _hofHirschfeld, _modhoster, _cache, installer,
             _previews, CreateAiProviderFromSettings, _host);
-        yield return new DownloadsTab(installer, _host);
+        yield return new DownloadsTab(installer, _previews, _host);
         yield return new SettingsTab(_settings, _host);
     }
 
@@ -153,16 +153,17 @@ public sealed class Ls25Plugin : IGameModPlugin
     private sealed class DownloadsTab : IGameTabContribution
     {
         private readonly ModInstallService _installer;
+        private readonly ModPreviewService _previews;
         private readonly IHostServices _host;
-        public DownloadsTab(ModInstallService installer, IHostServices host)
-        { _installer = installer; _host = host; }
+        public DownloadsTab(ModInstallService installer, ModPreviewService previews, IHostServices host)
+        { _installer = installer; _previews = previews; _host = host; }
         public string Id => "downloads";
         public string Label => "Downloads";
         public string Icon => "\U0001F4E5"; // 📥
         public int Order => 20;
         public bool IsVisible(DetectedGame game) => true;
         public Control CreateView(DetectedGame game, IHostServices host) =>
-            new DownloadsView { DataContext = new DownloadsViewModel(_installer, _host) };
+            new DownloadsView { DataContext = new DownloadsViewModel(_installer, _previews, _host) };
     }
 
     private sealed class SettingsTab : IGameTabContribution

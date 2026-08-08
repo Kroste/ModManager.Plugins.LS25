@@ -526,6 +526,7 @@ public sealed partial class CatalogRow : ObservableObject
 
     public bool CanInAppDownload => Source.CanInAppDownload;
     public bool NeedsBrowser => !Source.CanInAppDownload;
+    public bool IsFeatured => Source.IsFeatured;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(BadgeText))]

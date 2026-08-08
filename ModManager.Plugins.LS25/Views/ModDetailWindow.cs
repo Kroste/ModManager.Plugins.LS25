@@ -248,7 +248,12 @@ public sealed class ModDetailWindow : Window
             ItemTemplate = new FuncDataTemplate<ScreenshotItem>((item, _) =>
             {
                 if (item is null) return null;
-                var img = new Image { Stretch = Stretch.UniformToFill };
+                var img = new Image
+                {
+                    Stretch = Stretch.UniformToFill,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    VerticalAlignment = VerticalAlignment.Stretch,
+                };
                 img.Bind(Image.SourceProperty, new Binding(nameof(ScreenshotItem.Bitmap)));
                 return new Border
                 {

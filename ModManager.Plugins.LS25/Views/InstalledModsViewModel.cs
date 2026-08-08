@@ -115,15 +115,15 @@ public sealed partial class InstalledModsViewModel : ObservableObject
     }
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
-    private void ToggleEnabled()
+    private void ToggleEnabled() => ToggleEnabledRow(Selected);
+
+    [RelayCommand]
+    private void ToggleEnabledRow(ModRow? row)
     {
-        if (Selected is null) return;
+        if (row is null) return;
         try
         {
-            var updated = _installer.SetEnabled(Selected.Source, !Selected.Source.IsEnabled);
-            var idx = Mods.IndexOf(Selected);
-            Mods[idx] = new ModRow(updated);
-            Selected = Mods[idx];
+            var updated = _installer.SetEnabled(row.Source, !row.Source.IsEnabled);
             _host.Notifications.Notify(
                 $"Mod {(updated.IsEnabled ? "aktiviert" : "deaktiviert")}: {updated.FileName}",
                 NotificationLevel.Success);
@@ -137,18 +137,21 @@ public sealed partial class InstalledModsViewModel : ObservableObject
     }
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
-    private async Task UninstallAsync()
+    private async Task UninstallAsync() => await UninstallRowAsync(Selected);
+
+    [RelayCommand]
+    private async Task UninstallRowAsync(ModRow? row)
     {
-        if (Selected is null) return;
+        if (row is null) return;
         bool ok = await _host.Dialogs.ConfirmAsync(
             "Mod deinstallieren",
-            $"„{Selected.Source.FileName}“ wirklich löschen?",
+            $"„{row.Source.FileName}“ wirklich löschen?",
             okLabel: "Löschen", cancelLabel: "Abbrechen");
         if (!ok) return;
         try
         {
-            _installer.Uninstall(Selected.Source);
-            _host.Notifications.Notify($"Deinstalliert: {Selected.Source.FileName}", NotificationLevel.Success);
+            _installer.Uninstall(row.Source);
+            _host.Notifications.Notify($"Deinstalliert: {row.Source.FileName}", NotificationLevel.Success);
             Refresh();
         }
         catch (Exception ex)
@@ -466,6 +469,11 @@ public sealed partial class ModRow : ObservableObject
 
     [ObservableProperty]
     private Bitmap? _preview;
+
+    /// <summary>Nur im Downloads-Tab benutzt: markiert Rows deren Filename
+    /// bereits als installierter Mod existiert (Fuzzy-Filename-Match).</summary>
+    [ObservableProperty]
+    private bool _isAlreadyInstalled;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(UpdateBadgeText))]

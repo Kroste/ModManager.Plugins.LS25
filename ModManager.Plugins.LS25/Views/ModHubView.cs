@@ -187,7 +187,15 @@ public sealed class ModHubView : UserControl
         coverFallback.Classes.Add("muted");
         coverPanel.Children.Add(coverFallback);
 
-        var coverImage = new Image { Stretch = Stretch.UniformToFill };
+        // Explizit Stretch/Stretch — sonst rendert das Image auf einigen
+        // Systemen in Default-Größe (0×0) und das Cover bleibt unsichtbar
+        // trotz gesetzter Source-Bitmap.
+        var coverImage = new Image
+        {
+            Stretch = Stretch.UniformToFill,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch,
+        };
         coverImage.Bind(Image.SourceProperty, new Binding(nameof(CatalogRow.Cover)));
         coverPanel.Children.Add(coverImage);
         coverFrame.Child = coverPanel;
@@ -204,6 +212,8 @@ public sealed class ModHubView : UserControl
         titleRow.Children.Add(title);
         titleRow.Children.Add(MakeBadge(new Binding(nameof(CatalogRow.SourceLabel)),
             "KrosteAccentSoftBrush", "KrosteSecondaryTextBrush", null));
+        titleRow.Children.Add(MakeBadge(new Binding { Source = "⭐ EMPFOHLEN" },
+            "KrosteGoldBrush", null, new Binding(nameof(CatalogRow.IsFeatured))));
         titleRow.Children.Add(MakeBadge(new Binding { Source = "NEU" },
             "KrosteGoldBrush", null, new Binding(nameof(CatalogRow.IsNew))));
 

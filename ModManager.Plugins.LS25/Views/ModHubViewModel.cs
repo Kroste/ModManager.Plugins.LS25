@@ -279,28 +279,43 @@ public sealed partial class ModHubViewModel : ObservableObject
         }
     }
 
+    // Parallelität für Cover-Downloads. 6 gleichzeitige Requests halten das
+    // GIANTS-CDN happy und beschleunigen den Erst-Load bei 7000 Katalogeinträgen
+    // von ~24 min auf ~4 min.
+    private static readonly SemaphoreSlim _coverGate = new(6, 6);
+
     private async Task LoadCoversForAsync(List<CatalogRow> rows)
     {
+        var tasks = new List<Task>(rows.Count);
         foreach (var row in rows)
         {
             if (row.Cover is not null) continue;
             if (string.IsNullOrWhiteSpace(row.Source.PreviewUrl)) continue;
-            try
-            {
-                var path = await _previews.GetOrDownloadCoverAsync(row.Source.PreviewUrl);
-                if (path is null || !File.Exists(path)) continue;
-                await Dispatcher.UIThread.InvokeAsync(() =>
-                {
-                    try
-                    {
-                        using var s = File.OpenRead(path);
-                        row.Cover = new Bitmap(s);
-                    }
-                    catch (Exception ex) { Log.Warn(ex, "Cover-Bitmap-Load {p}", path); }
-                });
-            }
-            catch (Exception ex) { Log.Warn(ex, "Cover-Load fehlgeschlagen: {u}", row.Source.PreviewUrl); }
+            tasks.Add(LoadOneCoverAsync(row));
         }
+        try { await Task.WhenAll(tasks); }
+        catch { /* Einzelfehler stehen im Log, alle anderen laufen weiter */ }
+    }
+
+    private async Task LoadOneCoverAsync(CatalogRow row)
+    {
+        await _coverGate.WaitAsync();
+        try
+        {
+            var path = await _previews.GetOrDownloadCoverAsync(row.Source.PreviewUrl);
+            if (path is null || !File.Exists(path)) return;
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                try
+                {
+                    using var s = File.OpenRead(path);
+                    row.Cover = new Bitmap(s);
+                }
+                catch (Exception ex) { Log.Warn(ex, "Cover-Bitmap-Load {p}", path); }
+            });
+        }
+        catch (Exception ex) { Log.Warn(ex, "Cover-Load fehlgeschlagen: {u}", row.Source.PreviewUrl); }
+        finally { _coverGate.Release(); }
     }
 
     private void ApplyFilter()

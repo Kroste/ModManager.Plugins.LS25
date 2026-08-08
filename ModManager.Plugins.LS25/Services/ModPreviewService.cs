@@ -3,6 +3,7 @@ using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using NLog;
@@ -61,6 +62,25 @@ public sealed class ModPreviewService
         }, ct).ConfigureAwait(false);
     }
 
+    /// <summary>Ableitung eines stabilen Cache-Keys aus einer Cover-URL. Für
+    /// GIANTS-URLs (Format <c>.../storage/&lt;id&gt;/&lt;file&gt;</c>) nehmen wir
+    /// die mod_id + Dateiname — der bleibt stabil auch wenn GIANTS die CDN-
+    /// Subdomain rotiert (cdn31 → cdn32). Für andere URLs SHA1-Fallback.
+    /// v0.7.3 hatte SHA1(volle-URL) verwendet — dadurch wurden nach jeder
+    /// CDN-Rotation alle Cover neu heruntergeladen und der Cache wuchs
+    /// unnötig, ohne beim UI je zu greifen.</summary>
+    internal static string CacheKeyFor(string url)
+    {
+        var m = Regex.Match(url, @"/storage/(\d+)/([^/?#]+)", RegexOptions.IgnoreCase);
+        if (m.Success)
+        {
+            var id = m.Groups[1].Value;
+            var file = Path.GetFileNameWithoutExtension(m.Groups[2].Value);
+            return $"mod{id}_{file}";
+        }
+        return "sha1_" + Sha1Hex(url);
+    }
+
     /// <summary>Synchrone Cache-Prüfung. Liefert Pfad wenn ein Cover schon
     /// gecacht ist, sonst null — kein Download. Wichtig damit UI-Rows den
     /// Bitmap sofort im gleichen Frame anzeigen können statt einen async
@@ -68,7 +88,7 @@ public sealed class ModPreviewService
     public string? TryGetCachedCoverPath(string url)
     {
         if (string.IsNullOrWhiteSpace(url)) return null;
-        var basePath = Path.Combine(_paths.PreviewsCacheDir, "catalog_" + Sha1Hex(url));
+        var basePath = Path.Combine(_paths.PreviewsCacheDir, "catalog_" + CacheKeyFor(url));
         foreach (var ext in new[] { ".jpg", ".jpeg", ".png" })
         {
             var candidate = basePath + ext;
@@ -77,16 +97,14 @@ public sealed class ModPreviewService
         return null;
     }
 
-    /// <summary>Cover-Download vom ModHub-CDN. Cache-Key ist ein SHA1-Hash der
-    /// URL (Filename), damit lange URLs mit Query-Strings kein Dateisystem-
-    /// Problem auslösen. Dateiendung wird aus den Magic-Bytes der Response
-    /// bestimmt (JPG vs PNG).</summary>
+    /// <summary>Cover-Download vom ModHub-CDN. Cache-Key basiert auf mod_id
+    /// (stabil gegen CDN-Rotation). Dateiendung wird aus den Magic-Bytes der
+    /// Response bestimmt (JPG vs PNG).</summary>
     public async Task<string?> GetOrDownloadCoverAsync(string url, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(url)) return null;
 
-        var hash = Sha1Hex(url);
-        var basePath = Path.Combine(_paths.PreviewsCacheDir, "catalog_" + hash);
+        var basePath = Path.Combine(_paths.PreviewsCacheDir, "catalog_" + CacheKeyFor(url));
         foreach (var ext in new[] { ".jpg", ".jpeg", ".png" })
         {
             var candidate = basePath + ext;

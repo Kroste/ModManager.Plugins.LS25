@@ -124,16 +124,51 @@ public sealed partial class ModHubViewModel : ObservableObject
 
     private async Task InitializeAsync()
     {
-        var snapshot = _cache.Load(Language);
-        _seenSnapshot = _cache.LoadSeenSnapshot(Language);
+        // Cache-Load (2 MB JSON) MUSS off-UI-Thread laufen — sonst freezt der
+        // MainWindow-Sidebar beim App-Start, weil der ModHub-Tab wegen der
+        // FS25-Auto-Selection sofort instantiiert wird.
+        var (snapshot, seen) = await Task.Run(() =>
+            (_cache.Load(Language), _cache.LoadSeenSnapshot(Language)));
+        _seenSnapshot = seen;
         if (snapshot is not null)
         {
-            AddEntries(snapshot.Entries);
+            await AddEntriesBatchedAsync(snapshot.Entries);
             Status = $"{Rows.Count} Mods aus Cache (Alter: {(int)(DateTime.UtcNow - snapshot.SavedUtc).TotalHours} h).";
         }
 
         _ = LoadCategoriesAsync();
         await RefreshCatalogAsync();
+    }
+
+    /// <summary>Fügt Rows in Batches à 200 in die ObservableCollection ein und
+    /// yieldet zwischen den Batches per <c>await Task.Delay(1)</c>, damit die
+    /// UI-Message-Loop dazwischen rendern kann. Ohne Batching blockiert
+    /// 7000× Rows.Add die UI mehrere Sekunden — Sidebar bleibt leer bis
+    /// fertig.</summary>
+    private async Task AddEntriesBatchedAsync(IReadOnlyList<ModHubEntry> entries)
+    {
+        const int BatchSize = 200;
+        var missingCover = new List<CatalogRow>(entries.Count);
+        int batchStart = 0;
+        for (int i = 0; i < entries.Count; i++)
+        {
+            var e = entries[i];
+            _allEntries.Add(e);
+            var row = new CatalogRow(e) { IsNew = _seenSnapshot is not null && !_seenSnapshot.Contains(e.DetailUrl) };
+            if (RowMatchesFilter(row))
+            {
+                Rows.Add(row);
+                if (!string.IsNullOrWhiteSpace(row.Source.PreviewUrl))
+                    missingCover.Add(row);
+            }
+            if (i - batchStart >= BatchSize)
+            {
+                batchStart = i;
+                Status = $"Cache: {i}/{entries.Count} Mods …";
+                await Task.Delay(1);
+            }
+        }
+        if (missingCover.Count > 0) _ = LoadCoversForAsync(missingCover);
     }
 
     private async Task LoadCategoriesAsync()
@@ -243,40 +278,13 @@ public sealed partial class ModHubViewModel : ObservableObject
             if (RowMatchesFilter(row))
             {
                 Rows.Add(row);
-                // Cache-Hit: Bitmap SOFORT auf UI-Thread laden. Verhindert die
-                // Race, dass ApplyFilter die Row wegräumt bevor der async
-                // Cover-Load fertig ist.
-                if (!TryLoadCachedCover(row) && !string.IsNullOrWhiteSpace(row.Source.PreviewUrl))
+                if (!string.IsNullOrWhiteSpace(row.Source.PreviewUrl))
                     missingCover.Add(row);
             }
             added++;
         }
         if (missingCover.Count > 0) _ = LoadCoversForAsync(missingCover);
         return added;
-    }
-
-    /// <summary>Sync-Path: Cover aus dem File-Cache lesen und sofort auf die
-    /// Row setzen. Liefert true wenn Cover gesetzt wurde (Cache-Hit), false
-    /// wenn nachgeladen werden muss.</summary>
-    private bool TryLoadCachedCover(CatalogRow row)
-    {
-        if (string.IsNullOrWhiteSpace(row.Source.PreviewUrl)) return false;
-        var path = _previews.TryGetCachedCoverPath(row.Source.PreviewUrl);
-        if (path is null) return false;
-        try
-        {
-            using var s = File.OpenRead(path);
-            row.Cover = new Bitmap(s);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            // Bewusst Warn statt Debug — auf Bazzite gab es Fälle wo Skia
-            // bestimmte JPEG-Varianten nicht lud; ohne Log sieht der User nur
-            // fehlende Cover und keinen Hinweis.
-            Log.Warn(ex, "Cover-Bitmap-Load fehlgeschlagen: {p}", path);
-            return false;
-        }
     }
 
     // Parallelität für Cover-Downloads. 6 gleichzeitige Requests halten das
@@ -329,7 +337,7 @@ public sealed partial class ModHubViewModel : ObservableObject
             var row = new CatalogRow(e) { IsNew = _seenSnapshot is not null && !_seenSnapshot.Contains(e.DetailUrl) };
             if (!RowMatchesFilter(row)) continue;
             Rows.Add(row);
-            if (!TryLoadCachedCover(row) && !string.IsNullOrWhiteSpace(row.Source.PreviewUrl))
+            if (!string.IsNullOrWhiteSpace(row.Source.PreviewUrl))
                 missingCover.Add(row);
         }
         if (missingCover.Count > 0) _ = LoadCoversForAsync(missingCover);

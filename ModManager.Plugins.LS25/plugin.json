@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "kroste.ls25",
   "displayName": "Landwirtschafts-Simulator 25",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "author": "Kroste",
   "description": "Mod-Manager für den Landwirtschafts-Simulator 25 (FS25) — Kroste-Card-Look. Per-Row-Buttons, Cover, INSTALLIERT- und ⭐ EMPFOHLEN-Badges, Spielstart via Steam, Mod-Updates, Detail-Dialog, aggregierter ModHub, Backup/Restore, KI-Zusammenfassung über zentralen Host-Provider (IHostServices.Ai). Kein eigener Settings-Tab mehr — KI-Config im Host-Settings-Fenster.",
   "assembly": "ModManager.Plugins.LS25.dll",

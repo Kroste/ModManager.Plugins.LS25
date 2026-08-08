@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -347,28 +346,6 @@ public sealed partial class InstalledModsViewModel : ObservableObject
         if (!Version.TryParse(catalogVersion.Trim(), out var cat)) return false;
         if (!Version.TryParse(installedVersion.Trim(), out var inst)) return false;
         return cat > inst;
-    }
-
-    /// <summary>Startet Farming Simulator 25 über das Steam-Protokoll
-    /// <c>steam://run/2300320</c>. Funktioniert Windows + Linux (dort geht
-    /// Steam an das Proton-Prefix). Wenn Steam nicht installiert ist, gibt
-    /// das OS eine "no handler"-Meldung — wir fangen die als Notify ab.</summary>
-    [RelayCommand]
-    private void LaunchGame()
-    {
-        const int fs25AppId = 2300320;
-        try
-        {
-            Process.Start(new ProcessStartInfo($"steam://run/{fs25AppId}") { UseShellExecute = true });
-            _host.Notifications.Notify("Starte Farming Simulator 25 über Steam …", NotificationLevel.Info);
-            _host.Logger.Info("LS25: Spielstart-URI aufgerufen (AppId {AppId})", fs25AppId);
-        }
-        catch (Exception ex)
-        {
-            _host.Logger.Warn(ex, "LS25: Spielstart fehlgeschlagen");
-            _host.Notifications.Notify(
-                $"Spielstart fehlgeschlagen: {ex.Message}", NotificationLevel.Error);
-        }
     }
 
     [RelayCommand]

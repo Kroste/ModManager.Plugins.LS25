@@ -35,10 +35,9 @@ public sealed class InstalledModsView : UserControl
 
     private static Control BuildToolbar()
     {
-        // SPIEL: Starten + Updates prüfen
-        var launchBtn = new Button { Content = "▶  LS25 starten" };
-        launchBtn.Classes.Add("accent");
-        launchBtn.Bind(Button.CommandProperty, new Binding(nameof(InstalledModsViewModel.LaunchGameCommand)));
+        // MOD-UPDATES: Prüft ob installierte Mods im ModHub eine neuere Version
+        // haben (siehe CheckUpdatesCommand). Spielstart selbst liegt im Host —
+        // Content-Header „▶ Spiel starten"-Button und Sidebar-Doppelklick.
         var updatesBtn = new Button { Content = "🔄  Updates prüfen" };
         updatesBtn.Bind(Button.CommandProperty, new Binding(nameof(InstalledModsViewModel.CheckUpdatesCommand)));
 
@@ -67,7 +66,6 @@ public sealed class InstalledModsView : UserControl
             Spacing = 6,
             Margin = new Thickness(0, 0, 0, 10),
         };
-        toolbar.Children.Add(launchBtn);
         toolbar.Children.Add(updatesBtn);
         toolbar.Children.Add(NewDivider());
         toolbar.Children.Add(installBtn);

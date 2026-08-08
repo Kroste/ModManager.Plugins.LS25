@@ -113,19 +113,33 @@ public sealed class ModPreviewService
 
         try
         {
+            Log.Info("Cover-Download start: {url}", url);
             using var res = await _http.GetAsync(url, ct);
-            if (!res.IsSuccessStatusCode) return null;
+            if (!res.IsSuccessStatusCode)
+            {
+                Log.Warn("Cover-Download HTTP {status} für {url}", (int)res.StatusCode, url);
+                return null;
+            }
             var bytes = await res.Content.ReadAsByteArrayAsync(ct);
-            if (bytes.Length == 0) return null;
+            if (bytes.Length == 0)
+            {
+                Log.Warn("Cover-Download leer: {url}", url);
+                return null;
+            }
             var ext = Ls25Paths.GuessImageExtension(bytes);
-            if (ext == ".bin") return null;
+            if (ext == ".bin")
+            {
+                Log.Warn("Cover-Download kein Bild-Magic-Byte ({bytes} B): {url}", bytes.Length, url);
+                return null;
+            }
             var target = basePath + ext;
             await File.WriteAllBytesAsync(target, bytes, ct);
+            Log.Info("Cover gespeichert ({bytes} B) → {target}", bytes.Length, target);
             return target;
         }
         catch (Exception ex)
         {
-            Log.Debug(ex, "Cover-Download fehlgeschlagen: {url}", url);
+            Log.Warn(ex, "Cover-Download-Exception: {url}", url);
             return null;
         }
     }

@@ -293,6 +293,8 @@ public sealed partial class ModHubViewModel : ObservableObject
             if (string.IsNullOrWhiteSpace(row.Source.PreviewUrl)) continue;
             tasks.Add(LoadOneCoverAsync(row));
         }
+        Log.Info("LoadCoversForAsync: {n} Tasks gestartet (skip {skip})",
+            tasks.Count, rows.Count - tasks.Count);
         try { await Task.WhenAll(tasks); }
         catch { /* Einzelfehler stehen im Log, alle anderen laufen weiter */ }
     }

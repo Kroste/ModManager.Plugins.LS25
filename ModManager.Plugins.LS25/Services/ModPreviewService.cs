@@ -31,6 +31,14 @@ public sealed class ModPreviewService
         _paths = paths;
         _reader = reader;
         _http = http ?? DefaultHttp;
+
+        // GIANTS-CDN gibt Cover nur mit Referer frei — sonst HTTP 403.
+        // Der Host liefert einen HttpClient mit User-Agent, aber ohne
+        // Referer/Accept-Language. Ergänzen (LS-ModManager-Werte).
+        if (_http.DefaultRequestHeaders.Referrer is null)
+            _http.DefaultRequestHeaders.Referrer = new Uri("https://www.farming-simulator.com/");
+        if (_http.DefaultRequestHeaders.AcceptLanguage.Count == 0)
+            _http.DefaultRequestHeaders.AcceptLanguage.ParseAdd("de-DE,de;q=0.9,en;q=0.5");
     }
 
     /// <summary>Liefert Cache-Path zu einer Mod-ZIP. Wenn kein Cache existiert,

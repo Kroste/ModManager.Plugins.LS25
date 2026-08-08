@@ -288,23 +288,31 @@ public sealed partial class ModHubViewModel : ObservableObject
     }
 
     // Parallelität für Cover-Downloads. 6 gleichzeitige Requests halten das
-    // GIANTS-CDN happy und beschleunigen den Erst-Load bei 7000 Katalogeinträgen
-    // von ~24 min auf ~4 min.
+    // GIANTS-CDN happy und beschleunigen den Erst-Load bei 7000 Katalog-
+    // einträgen von ~24 min auf ~4 min.
     private static readonly SemaphoreSlim _coverGate = new(6, 6);
 
     private async Task LoadCoversForAsync(List<CatalogRow> rows)
     {
-        var tasks = new List<Task>(rows.Count);
-        foreach (var row in rows)
+        // Batches à 50 mit kurzem Yield dazwischen. Ohne das steht die UI-
+        // Message-Queue mit tausenden Dispatcher-Posts voll und die App wirkt
+        // einfroren. Innerhalb eines Batches laufen die Downloads parallel
+        // (Semaphore).
+        const int BatchSize = 50;
+        int loaded = 0;
+        for (int i = 0; i < rows.Count; i += BatchSize)
         {
-            if (row.Cover is not null) continue;
-            if (string.IsNullOrWhiteSpace(row.Source.PreviewUrl)) continue;
-            tasks.Add(LoadOneCoverAsync(row));
+            var batch = rows.Skip(i).Take(BatchSize)
+                .Where(r => r.Cover is null && !string.IsNullOrWhiteSpace(r.Source.PreviewUrl))
+                .Select(LoadOneCoverAsync)
+                .ToArray();
+            if (batch.Length == 0) continue;
+            try { await Task.WhenAll(batch); }
+            catch { /* Einzelfehler im Log */ }
+            loaded += batch.Length;
+            await Task.Delay(20); // UI-Thread Luft geben
         }
-        Log.Info("LoadCoversForAsync: {n} Tasks gestartet (skip {skip})",
-            tasks.Count, rows.Count - tasks.Count);
-        try { await Task.WhenAll(tasks); }
-        catch { /* Einzelfehler stehen im Log, alle anderen laufen weiter */ }
+        Log.Info("LoadCoversForAsync: {n} Rows verarbeitet", loaded);
     }
 
     private async Task LoadOneCoverAsync(CatalogRow row)
@@ -314,15 +322,20 @@ public sealed partial class ModHubViewModel : ObservableObject
         {
             var path = await _previews.GetOrDownloadCoverAsync(row.Source.PreviewUrl);
             if (path is null || !File.Exists(path)) return;
-            await Dispatcher.UIThread.InvokeAsync(() =>
+            // Bitmap OFF-UI-Thread dekodieren — Skia auf Linux liest den Stream
+            // ohne GL-Kontext. Nur die Property-Zuweisung MUSS auf UI-Thread
+            // (weil der Bindings-Push den PropertyChanged-Event feuert).
+            Bitmap? bmp = null;
+            try
             {
-                try
+                bmp = await Task.Run(() =>
                 {
                     using var s = File.OpenRead(path);
-                    row.Cover = new Bitmap(s);
-                }
-                catch (Exception ex) { Log.Warn(ex, "Cover-Bitmap-Load {p}", path); }
-            });
+                    return new Bitmap(s);
+                });
+            }
+            catch (Exception ex) { Log.Warn(ex, "Cover-Bitmap-Decode {p}", path); return; }
+            await Dispatcher.UIThread.InvokeAsync(() => row.Cover = bmp);
         }
         catch (Exception ex) { Log.Warn(ex, "Cover-Load fehlgeschlagen: {u}", row.Source.PreviewUrl); }
         finally { _coverGate.Release(); }

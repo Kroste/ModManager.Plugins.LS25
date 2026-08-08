@@ -72,12 +72,23 @@ public sealed partial class ModHubViewModel : ObservableObject
         };
         SelectedSource = Sources[0];
 
+        SortOptions = new ObservableCollection<CatalogSortOption>
+        {
+            new("default",  "Standard"),
+            new("neu",      "NEU zuerst"),
+            new("name",     "Name (A–Z)"),
+            new("author",   "Autor (A–Z)"),
+            new("category", "Kategorie (A–Z)"),
+        };
+        SelectedSort = SortOptions[0];
+
         _ = InitializeAsync();
     }
 
     public ObservableCollection<CatalogRow> Rows { get; } = new();
     public ObservableCollection<ModHubCategory> Categories { get; }
     public ObservableCollection<SourceFilterOption> Sources { get; }
+    public ObservableCollection<CatalogSortOption> SortOptions { get; }
 
     [ObservableProperty]
     private string _searchText = string.Empty;
@@ -87,6 +98,9 @@ public sealed partial class ModHubViewModel : ObservableObject
 
     [ObservableProperty]
     private SourceFilterOption? _selectedSource;
+
+    [ObservableProperty]
+    private CatalogSortOption? _selectedSort;
 
     [ObservableProperty]
     private string _status = "Katalog wird geladen …";
@@ -123,6 +137,7 @@ public sealed partial class ModHubViewModel : ObservableObject
     partial void OnSearchTextChanged(string value) => ApplyFilter();
     partial void OnSelectedCategoryChanged(ModHubCategory? value) => ApplyFilter();
     partial void OnSelectedSourceChanged(SourceFilterOption? value) => ApplyFilter();
+    partial void OnSelectedSortChanged(CatalogSortOption? value) => ApplyFilter();
 
     private async Task InitializeAsync()
     {
@@ -368,15 +383,67 @@ public sealed partial class ModHubViewModel : ObservableObject
     {
         Rows.Clear();
         var missingCover = new List<CatalogRow>();
+
+        // Installed-Titel einmal normalisieren (Fuzzy-Match für ✓ INSTALLIERT-
+        // Badge). Analog LS-ModManager: normalisierte Filename gegen
+        // normalisierten Titel, Substring in beide Richtungen.
+        var installedNorms = _installer.ListInstalled()
+            .Select(m => NormalizeForMatch(m.Metadata?.Title ?? Path.GetFileNameWithoutExtension(m.FileName)))
+            .Where(n => n.Length >= 3)
+            .ToList();
+
+        var candidates = new List<CatalogRow>();
         foreach (var e in _allEntries)
         {
-            var row = new CatalogRow(e) { IsNew = _seenSnapshot is not null && !_seenSnapshot.Contains(e.DetailUrl) };
+            var row = new CatalogRow(e)
+            {
+                IsNew = _seenSnapshot is not null && !_seenSnapshot.Contains(e.DetailUrl),
+            };
             if (!RowMatchesFilter(row)) continue;
+            // Fuzzy: Titel-Normalisierung, dann Substring-Match in beide
+            // Richtungen (Katalog-Titel ⊂ Filename oder umgekehrt).
+            var titleNorm = NormalizeForMatch(row.Title);
+            row.IsInstalled = titleNorm.Length >= 3 &&
+                installedNorms.Any(f => f.Contains(titleNorm) || titleNorm.Contains(f));
+            candidates.Add(row);
+        }
+
+        // Sortieren: SelectedSort.Key entscheidet.
+        var sorted = SortCandidates(candidates);
+        foreach (var row in sorted)
+        {
             Rows.Add(row);
             if (!string.IsNullOrWhiteSpace(row.Source.PreviewUrl))
                 missingCover.Add(row);
         }
         if (missingCover.Count > 0) _ = LoadCoversForAsync(missingCover);
+    }
+
+    private IEnumerable<CatalogRow> SortCandidates(List<CatalogRow> rows) =>
+        (SelectedSort?.Key ?? "default") switch
+        {
+            "neu"      => rows.OrderByDescending(r => r.IsNew).ThenBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase),
+            "name"     => rows.OrderBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase),
+            "author"   => rows.OrderBy(r => r.Author, StringComparer.CurrentCultureIgnoreCase)
+                             .ThenBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase),
+            "category" => rows.OrderBy(r => r.Category, StringComparer.CurrentCultureIgnoreCase)
+                             .ThenBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase),
+            _          => rows.AsEnumerable(),
+        };
+
+    /// <summary>Normalisierung für Fuzzy-Match Titel ↔ Filename. Nur
+    /// Buchstaben/Ziffern, lowercase, FS/LS-Präfixe abschneiden. Analog
+    /// InstalledModsViewModel.NormalizeForMatch (bewusste Duplikation —
+    /// eine kleine Helper-Klasse wäre Overkill).</summary>
+    internal static string NormalizeForMatch(string s)
+    {
+        var sb = new System.Text.StringBuilder(s.Length);
+        foreach (var c in s)
+            if (char.IsLetterOrDigit(c)) sb.Append(char.ToLowerInvariant(c));
+        var result = sb.ToString();
+        foreach (var prefix in new[] { "fs25", "fs22", "ls25", "ls22" })
+            if (result.StartsWith(prefix)) result = result.Substring(prefix.Length);
+        return result;
     }
 
     private bool RowMatchesFilter(CatalogRow row)
@@ -596,7 +663,18 @@ public sealed partial class CatalogRow : ObservableObject
     [ObservableProperty]
     private Bitmap? _cover;
 
+    /// <summary>Katalog-Eintrag ist bereits im Mods-Ordner installiert
+    /// (Fuzzy-Match nach LS-ModManager-Muster: normalisierter Titel ↔
+    /// normalisierter Filename der installierten Mods).</summary>
+    [ObservableProperty]
+    private bool _isInstalled;
+
     public string BadgeText => IsNew ? "NEU" : "";
 }
 
 public sealed record SourceFilterOption(string? SourceKey, string Label);
+
+/// <summary>Sortier-Modi für die ModHub-Liste. „Standard" ist Katalog-
+/// Ladereihenfolge (Featured/NEU zuerst durch die GIANTS-Sortierung).
+/// „Neu zuerst" bringt die <see cref="CatalogRow.IsNew"/>-Rows nach oben.</summary>
+public sealed record CatalogSortOption(string Key, string Label);

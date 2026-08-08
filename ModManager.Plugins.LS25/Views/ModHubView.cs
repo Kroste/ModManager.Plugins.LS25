@@ -79,21 +79,36 @@ public sealed class ModHubView : UserControl
             Children = { sourceBox, categoryBox, searchBox, refreshBtn },
         };
 
-        // Rechts: Sortier-Label. Die Sortier-Combo kommt in v0.8 (aktuell
-        // keine Sortier-Optionen im VM — ohne Options wäre der Dropdown-
-        // Widget ein Fake, deshalb erstmal nur Label als Platzhalter.)
+        // Rechts: Sortier-Combo. Options aus ModHubViewModel.SortOptions
+        // (Standard, NEU zuerst, Name, Autor, Kategorie).
         var sortLabel = new TextBlock
         {
-            Text = "Sortierung: Standard",
+            Text = "Sortierung:",
             VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 6, 0),
         };
         sortLabel.Classes.Add("muted");
+        var sortBox = new ComboBox
+        {
+            Width = 170,
+            DisplayMemberBinding = new Binding(nameof(CatalogSortOption.Label)),
+        };
+        sortBox.Bind(ComboBox.ItemsSourceProperty, new Binding(nameof(ModHubViewModel.SortOptions)));
+        sortBox.Bind(ComboBox.SelectedItemProperty, new Binding(nameof(ModHubViewModel.SelectedSort))
+        { Mode = BindingMode.TwoWay });
+
+        var right = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children = { sortLabel, sortBox },
+        };
 
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 0, 0, 10) };
         Grid.SetColumn(left, 0);
-        Grid.SetColumn(sortLabel, 1);
+        Grid.SetColumn(right, 1);
         grid.Children.Add(left);
-        grid.Children.Add(sortLabel);
+        grid.Children.Add(right);
         return grid;
     }
 
@@ -163,6 +178,14 @@ public sealed class ModHubView : UserControl
         list.Bind(ListBox.SelectedItemProperty, new Binding(nameof(ModHubViewModel.Selected))
         { Mode = BindingMode.TwoWay });
         list.ItemTemplate = new FuncDataTemplate<CatalogRow>((row, _) => row is null ? null : BuildRowTemplate(), supportsRecycling: true);
+
+        // Doppelklick auf eine Katalog-Row → Details-Fenster (nur GIANTS,
+        // sonst „Detail im Browser"-Fallback). Analog Standalone-Muster.
+        list.DoubleTapped += (_, _) =>
+        {
+            if (list.DataContext is ModHubViewModel vm && vm.Selected is not null)
+                vm.ShowDetailForRowCommand.Execute(vm.Selected);
+        };
         return list;
     }
 
@@ -212,6 +235,11 @@ public sealed class ModHubView : UserControl
         titleRow.Children.Add(title);
         titleRow.Children.Add(MakeBadge(new Binding(nameof(CatalogRow.SourceLabel)),
             "KrosteAccentSoftBrush", "KrosteSecondaryTextBrush", null));
+        // ✓ INSTALLIERT (grün mit weißem Text) — Fuzzy-Match Titel ↔ Filename.
+        // Analog Downloads-Tab-Badge; MakeBadge braucht IBrush-Overload weil
+        // Weiß nicht als Kroste-Resource-Key existiert.
+        titleRow.Children.Add(MakeBadgeSolid("✓ INSTALLIERT",
+            "KrosteSuccessBrush", Brushes.White, new Binding(nameof(CatalogRow.IsInstalled))));
         titleRow.Children.Add(MakeBadge(new Binding { Source = "⭐ EMPFOHLEN" },
             "KrosteGoldBrush", null, new Binding(nameof(CatalogRow.IsFeatured))));
         titleRow.Children.Add(MakeBadge(new Binding { Source = "NEU" },
@@ -315,6 +343,29 @@ public sealed class ModHubView : UserControl
             tb.Foreground = Brushes.Black;
         tb.Bind(TextBlock.TextProperty, textBinding);
         border.Child = tb;
+        if (visibleBinding is not null) border.Bind(Border.IsVisibleProperty, visibleBinding);
+        return border;
+    }
+
+    /// <summary>Wie <see cref="MakeBadge"/>, aber mit festem Text und
+    /// direktem Brush als Foreground (für Weiß auf grünen Success-Badges —
+    /// „Weiß" gibt es nicht als Kroste-Resource-Key).</summary>
+    private static Border MakeBadgeSolid(string text, string bgResourceKey,
+        IBrush foreground, Binding? visibleBinding)
+    {
+        var border = new Border
+        {
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(8, 1),
+            VerticalAlignment = VerticalAlignment.Center,
+            [!Border.BackgroundProperty] = new DynamicResourceExtension(bgResourceKey),
+        };
+        border.Child = new TextBlock
+        {
+            Text = text,
+            FontSize = 10, FontWeight = FontWeight.SemiBold,
+            Foreground = foreground,
+        };
         if (visibleBinding is not null) border.Bind(Border.IsVisibleProperty, visibleBinding);
         return border;
     }

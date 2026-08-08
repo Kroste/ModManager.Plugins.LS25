@@ -37,18 +37,33 @@ public sealed partial class InstalledModsViewModel : ObservableObject
         _paths = paths;
         _host = host;
         ModsDir = installer.ModsDir;
+        InitEvents();
         RefreshCommand.Execute(null);
     }
 
     public string ModsDir { get; }
 
+    /// <summary>Kompletter Datenbestand — gefiltert in <see cref="Mods"/>
+    /// per <see cref="ApplyFilter"/>. Refresh() füllt _allMods, ApplyFilter
+    /// rendert Mods.</summary>
+    private readonly List<ModRow> _allMods = new();
     public ObservableCollection<ModRow> Mods { get; } = new();
+
+    /// <summary>Von der ListBox über TwoWay-Binding gefüllte Auswahl. Wird
+    /// bei Bulk-Aktionen (Aktivieren/Deaktivieren/Deinstallieren mehrere
+    /// Mods gleichzeitig) verwendet. Die Single-Selected-Property bleibt
+    /// für Tastatur-Fokus und Row-basierte Commands.</summary>
+    public ObservableCollection<ModRow> SelectedRows { get; } = new();
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSelection))]
+    [NotifyPropertyChangedFor(nameof(SelectedCountLabel))]
     private ModRow? _selected;
 
     public bool HasSelection => Selected is not null;
+    public bool HasMultiSelection => SelectedRows.Count > 1;
+    public string SelectedCountLabel =>
+        SelectedRows.Count > 1 ? $"{SelectedRows.Count} ausgewählt" : "";
 
     [ObservableProperty]
     private bool _isCheckingUpdates;
@@ -56,22 +71,43 @@ public sealed partial class InstalledModsViewModel : ObservableObject
     [ObservableProperty]
     private string _summary = "";
 
+    /// <summary>Volltext-Filter über Titel/Autor/Dateiname.</summary>
+    [ObservableProperty]
+    private string _searchText = "";
+
+    /// <summary>Filter-Toggle: nur Mods anzeigen bei denen ein Update
+    /// verfügbar ist (nach CheckUpdatesAsync). Analog Standalone-Filter.</summary>
+    [ObservableProperty]
+    private bool _onlyWithUpdate;
+
     partial void OnSelectedChanged(ModRow? value) => OnPropertyChanged(nameof(HasSelection));
+    partial void OnSearchTextChanged(string value) => ApplyFilter();
+    partial void OnOnlyWithUpdateChanged(bool value) => ApplyFilter();
+
+    public InstalledModsViewModel InitEvents()
+    {
+        SelectedRows.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(HasMultiSelection));
+            OnPropertyChanged(nameof(SelectedCountLabel));
+        };
+        return this;
+    }
 
     [RelayCommand]
     private void Refresh()
     {
-        Mods.Clear();
+        _allMods.Clear();
         try
         {
             foreach (var m in _installer.ListInstalled()
                          .OrderByDescending(m => m.IsEnabled)
                          .ThenBy(m => m.Metadata?.Title ?? m.FileName, StringComparer.CurrentCultureIgnoreCase))
-                Mods.Add(new ModRow(m));
+                _allMods.Add(new ModRow(m));
 
-            var enabled = Mods.Count(r => r.Source.IsEnabled);
-            var total = Mods.Count;
-            var totalBytes = Mods.Where(r => r.Source.IsEnabled).Sum(r => r.Source.FileSizeBytes);
+            var enabled = _allMods.Count(r => r.Source.IsEnabled);
+            var total = _allMods.Count;
+            var totalBytes = _allMods.Where(r => r.Source.IsEnabled).Sum(r => r.Source.FileSizeBytes);
             Summary = total == 0
                 ? "Keine Mods im Mods-Ordner."
                 : $"{enabled} aktiv / {total} total · {FormatBytes(totalBytes)}";
@@ -82,7 +118,29 @@ public sealed partial class InstalledModsViewModel : ObservableObject
             Summary = "Fehler beim Lesen des Mods-Ordners.";
         }
 
-        _ = LoadPreviewsAsync(Mods.ToArray());
+        ApplyFilter();
+        _ = LoadPreviewsAsync(_allMods.ToArray());
+    }
+
+    /// <summary>Filtert <see cref="_allMods"/> nach <see cref="SearchText"/>
+    /// und <see cref="OnlyWithUpdate"/> in <see cref="Mods"/>. Wird bei
+    /// jedem Filter-Change und Refresh() aufgerufen.</summary>
+    private void ApplyFilter()
+    {
+        var q = SearchText?.Trim() ?? "";
+        Mods.Clear();
+        foreach (var row in _allMods)
+        {
+            if (OnlyWithUpdate && !row.HasUpdate) continue;
+            if (q.Length > 0)
+            {
+                bool hit = row.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
+                        || row.Author.Contains(q, StringComparison.OrdinalIgnoreCase)
+                        || row.FileName.Contains(q, StringComparison.OrdinalIgnoreCase);
+                if (!hit) continue;
+            }
+            Mods.Add(row);
+        }
     }
 
     private async Task LoadPreviewsAsync(ModRow[] rows)
@@ -138,6 +196,58 @@ public sealed partial class InstalledModsViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(HasSelection))]
     private async Task UninstallAsync() => await UninstallRowAsync(Selected);
 
+    /// <summary>Aktiviert bzw. deaktiviert alle in <see cref="SelectedRows"/>.
+    /// Wenn gemischter Zustand: alle werden AKTIVIERT (Standalone-Muster).
+    /// Sonst wird der Zustand invertiert.</summary>
+    [RelayCommand]
+    private void ToggleEnabledBulk()
+    {
+        if (SelectedRows.Count == 0) return;
+        var rows = SelectedRows.ToList(); // Snapshot — Refresh() gleich rebuild
+        bool allEnabled = rows.All(r => r.Source.IsEnabled);
+        bool target = !allEnabled; // gemischt → aktivieren, alle-aktiv → deaktivieren
+        int done = 0;
+        foreach (var r in rows)
+        {
+            try
+            {
+                if (r.Source.IsEnabled != target)
+                    _installer.SetEnabled(r.Source, target);
+                done++;
+            }
+            catch (Exception ex) { _host.Logger.Warn(ex, "Bulk-Toggle für {F}", r.FileName); }
+        }
+        _host.Notifications.Notify(
+            $"{done} Mod(s) {(target ? "aktiviert" : "deaktiviert")}.",
+            NotificationLevel.Success);
+        Refresh();
+    }
+
+    /// <summary>Deinstalliert alle <see cref="SelectedRows"/> mit einem
+    /// Sammel-Confirm-Dialog.</summary>
+    [RelayCommand]
+    private async Task UninstallBulkAsync()
+    {
+        if (SelectedRows.Count == 0) return;
+        var rows = SelectedRows.ToList();
+        bool ok = await _host.Dialogs.ConfirmAsync(
+            "Mods deinstallieren",
+            $"{rows.Count} Mod(s) wirklich löschen?\n\n" +
+            string.Join("\n", rows.Take(10).Select(r => "• " + r.FileName)) +
+            (rows.Count > 10 ? $"\n… und {rows.Count - 10} weitere" : ""),
+            okLabel: "Löschen", cancelLabel: "Abbrechen");
+        if (!ok) return;
+
+        int done = 0;
+        foreach (var r in rows)
+        {
+            try { _installer.Uninstall(r.Source); done++; }
+            catch (Exception ex) { _host.Logger.Warn(ex, "Bulk-Uninstall für {F}", r.FileName); }
+        }
+        _host.Notifications.Notify($"{done} Mod(s) deinstalliert.", NotificationLevel.Success);
+        Refresh();
+    }
+
     [RelayCommand]
     private async Task UninstallRowAsync(ModRow? row)
     {
@@ -182,6 +292,26 @@ public sealed partial class InstalledModsViewModel : ObservableObject
 
     [RelayCommand]
     private void OpenModsFolder() => _host.Shell.OpenDirectory(ModsDir);
+
+    /// <summary>Wird vom Drag&amp;Drop-Handler in der View aufgerufen — pro
+    /// gedropter .zip-Datei einmal. Fehler landen im Log + Notify; die View
+    /// ruft am Ende einmal Refresh() für den Gesamtstand auf.</summary>
+    public void InstallDroppedZip(string zipPath)
+    {
+        try
+        {
+            var installed = _installer.Install(zipPath, overwrite: false);
+            _host.Notifications.Notify($"Installiert (Drop): {installed.FileName}",
+                NotificationLevel.Success);
+        }
+        catch (Exception ex)
+        {
+            _host.Logger.Warn(ex, "LS25: Drop-Install fehlgeschlagen für {P}", zipPath);
+            _host.Notifications.Notify(
+                $"Drop-Install fehlgeschlagen ({System.IO.Path.GetFileName(zipPath)}): {ex.Message}",
+                NotificationLevel.Error);
+        }
+    }
 
     /// <summary>Prüft für jeden installierten Mod, ob im Katalog eine neuere
     /// Version steht. Fuzzy-Match Filename ↔ Katalog-Titel. Läuft nicht

@@ -26,6 +26,7 @@ public sealed partial class ModDetailViewModel : ObservableObject
 
     private readonly ModHubService _hub;
     private readonly ModPreviewService _previews;
+    private readonly DownloadEventBus _downloadBus;
     private readonly IHostServices _host;
     private readonly int _modId;
     private readonly string _fallbackTitle;
@@ -36,11 +37,12 @@ public sealed partial class ModDetailViewModel : ObservableObject
 
     public ModDetailViewModel(int modId, CatalogRow row,
         ModHubService hub, ModPreviewService previews,
-        IHostServices host)
+        DownloadEventBus downloadBus, IHostServices host)
     {
         _modId = modId;
         _hub = hub;
         _previews = previews;
+        _downloadBus = downloadBus;
         _host = host;
 
         _fallbackTitle = row.Source.Title;
@@ -159,6 +161,7 @@ public sealed partial class ModDetailViewModel : ObservableObject
                 return;
             }
             _host.Notifications.Notify($"Heruntergeladen: {result.FileName}", NotificationLevel.Success);
+            _downloadBus.RaiseDownloadsChanged(result.FileName);
         }
         catch (Exception ex)
         {

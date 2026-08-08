@@ -570,7 +570,7 @@ public sealed partial class ModHubViewModel : ObservableObject
             _host.Shell.OpenExternalUrl(Selected.Source.DetailUrl);
             return;
         }
-        var vm = new ModDetailViewModel(modId.Value, Selected, _hub, _previews, _host);
+        var vm = new ModDetailViewModel(modId.Value, Selected, _hub, _previews, _downloadBus, _host);
         var window = new ModDetailWindow { DataContext = vm };
         var owner = (Avalonia.Application.Current?.ApplicationLifetime
             as IClassicDesktopStyleApplicationLifetime)?.MainWindow;

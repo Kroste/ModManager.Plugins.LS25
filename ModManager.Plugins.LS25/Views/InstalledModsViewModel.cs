@@ -23,11 +23,12 @@ public sealed partial class InstalledModsViewModel : ObservableObject
     private readonly ModHubService _hub;
     private readonly CatalogCache _cache;
     private readonly Ls25Paths _paths;
+    private readonly DownloadEventBus _downloadBus;
     private readonly IHostServices _host;
 
     public InstalledModsViewModel(ModInstallService installer, ModBackupService backup,
         ModPreviewService previews, ModHubService hub, CatalogCache cache,
-        Ls25Paths paths, IHostServices host)
+        Ls25Paths paths, DownloadEventBus downloadBus, IHostServices host)
     {
         _installer = installer;
         _backup = backup;
@@ -35,10 +36,18 @@ public sealed partial class InstalledModsViewModel : ObservableObject
         _hub = hub;
         _cache = cache;
         _paths = paths;
+        _downloadBus = downloadBus;
         _host = host;
         ModsDir = installer.ModsDir;
         InitEvents();
         RefreshCommand.Execute(null);
+
+        // Auto-Refresh: sobald irgendwo im Plugin (Downloads-Tab, Drop, Update-
+        // Aktion aus ModHub) ein Mod in den Mods-Ordner geschrieben wurde,
+        // aktualisiert sich diese Liste automatisch — kein User-Klick auf
+        // „Aktualisieren" nötig.
+        _downloadBus.ModInstalled += (_, _) =>
+            Dispatcher.UIThread.Post(() => Refresh());
     }
 
     public string ModsDir { get; }
@@ -281,6 +290,7 @@ public sealed partial class InstalledModsViewModel : ObservableObject
         {
             var installed = _installer.Install(picked, overwrite: false);
             _host.Notifications.Notify($"Installiert: {installed.FileName}", NotificationLevel.Success);
+            _downloadBus.RaiseModInstalled(installed.FileName);
             Refresh();
         }
         catch (Exception ex)
@@ -303,6 +313,7 @@ public sealed partial class InstalledModsViewModel : ObservableObject
             var installed = _installer.Install(zipPath, overwrite: false);
             _host.Notifications.Notify($"Installiert (Drop): {installed.FileName}",
                 NotificationLevel.Success);
+            _downloadBus.RaiseModInstalled(installed.FileName);
         }
         catch (Exception ex)
         {
@@ -412,6 +423,7 @@ public sealed partial class InstalledModsViewModel : ObservableObject
             var result = await _hub.DownloadModAsync(modId.Value, Language, progress,
                 default, catalogEntry.PreviewUrl);
             if (result is null) throw new InvalidOperationException("Download lieferte null");
+            _downloadBus.RaiseDownloadsChanged(result.FileName);
 
             // 2. Alte Version aus dem Mod-Ordner entfernen
             await Task.Run(() => _installer.Uninstall(row.Source));
@@ -425,6 +437,7 @@ public sealed partial class InstalledModsViewModel : ObservableObject
 
             _host.Notifications.Notify($"Update installiert: {row.Title} → v{row.LatestVersion}",
                 NotificationLevel.Success);
+            _downloadBus.RaiseModInstalled(newMod.FileName);
             Refresh();
         }
         catch (Exception ex)

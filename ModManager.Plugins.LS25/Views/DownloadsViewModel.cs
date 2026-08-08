@@ -142,6 +142,7 @@ public sealed partial class DownloadsViewModel : ObservableObject
         {
             var installed = _installer.Install(row.Source.FilePath, overwrite: false);
             _host.Notifications.Notify($"Installiert: {installed.FileName}", NotificationLevel.Success);
+            _downloadBus.RaiseModInstalled(installed.FileName);
             Refresh();
         }
         catch (Exception ex)

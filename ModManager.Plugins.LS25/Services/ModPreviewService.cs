@@ -61,6 +61,22 @@ public sealed class ModPreviewService
         }, ct).ConfigureAwait(false);
     }
 
+    /// <summary>Synchrone Cache-Prüfung. Liefert Pfad wenn ein Cover schon
+    /// gecacht ist, sonst null — kein Download. Wichtig damit UI-Rows den
+    /// Bitmap sofort im gleichen Frame anzeigen können statt einen async
+    /// Cover-Load abzuwarten, der sich mit ApplyFilter/Rows.Clear beisst.</summary>
+    public string? TryGetCachedCoverPath(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        var basePath = Path.Combine(_paths.PreviewsCacheDir, "catalog_" + Sha1Hex(url));
+        foreach (var ext in new[] { ".jpg", ".jpeg", ".png" })
+        {
+            var candidate = basePath + ext;
+            if (File.Exists(candidate)) return candidate;
+        }
+        return null;
+    }
+
     /// <summary>Cover-Download vom ModHub-CDN. Cache-Key ist ein SHA1-Hash der
     /// URL (Filename), damit lange URLs mit Query-Strings kein Dateisystem-
     /// Problem auslösen. Dateiendung wird aus den Magic-Bytes der Response

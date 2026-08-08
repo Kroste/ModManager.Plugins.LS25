@@ -59,8 +59,13 @@ public sealed class ModHubView : UserControl
         var detailBtn = new Button { Content = "🌐  Detail im Browser" };
         detailBtn.Bind(Button.CommandProperty, new Binding(nameof(ModHubViewModel.OpenDetailInBrowserCommand)));
 
-        // KI-Zusammenfassung — nur bei GIANTS aktiv (Detail-Endpoint verfügbar).
-        var summarizeBtn = new Button { Content = "🤖  Zusammenfassen" };
+        // Details-Fenster — nur bei GIANTS (der Detail-Endpoint ist frei zugänglich).
+        var detailsBtn = new Button { Content = "👁  Details" };
+        detailsBtn.Bind(Button.CommandProperty, new Binding(nameof(ModHubViewModel.ShowDetailCommand)));
+        detailsBtn.Bind(Button.IsVisibleProperty, new Binding(nameof(ModHubViewModel.CanSummarizeSelected)));
+
+        // KI-Zusammenfassung im Panel oberhalb der Liste (Kurzform ohne Detail-Fenster).
+        var summarizeBtn = new Button { Content = "🤖  Kurzfassung" };
         summarizeBtn.Bind(Button.CommandProperty, new Binding(nameof(ModHubViewModel.SummarizeSelectedCommand)));
         summarizeBtn.Bind(Button.IsVisibleProperty, new Binding(nameof(ModHubViewModel.CanSummarizeSelected)));
 
@@ -81,6 +86,7 @@ public sealed class ModHubView : UserControl
         });
         toolbar.Children.Add(downloadBtn);
         toolbar.Children.Add(detailBtn);
+        toolbar.Children.Add(detailsBtn);
         toolbar.Children.Add(summarizeBtn);
 
         var hint = new TextBlock

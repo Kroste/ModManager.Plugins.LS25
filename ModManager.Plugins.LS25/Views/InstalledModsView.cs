@@ -24,6 +24,10 @@ public sealed class InstalledModsView : UserControl
             Spacing = 8,
             Margin = new Thickness(0, 0, 0, 12),
         };
+        var launchBtn = new Button { Content = "▶  Spiel starten" };
+        launchBtn.Classes.Add("accent");
+        launchBtn.Bind(Button.CommandProperty, new Binding(nameof(InstalledModsViewModel.LaunchGameCommand)));
+
         var installBtn = new Button { Content = "📁  Mod-ZIP installieren…" };
         installBtn.Bind(Button.CommandProperty, new Binding(nameof(InstalledModsViewModel.InstallFromFileCommand)));
         var refreshBtn = new Button { Content = "🔄  Refresh" };
@@ -36,6 +40,12 @@ public sealed class InstalledModsView : UserControl
         uninstallBtn.Classes.Add("danger");
         uninstallBtn.Bind(Button.CommandProperty, new Binding(nameof(InstalledModsViewModel.UninstallCommand)));
 
+        toolbar.Children.Add(launchBtn);
+        toolbar.Children.Add(new Rectangle
+        {
+            Width = 1, Fill = new SolidColorBrush(Color.FromRgb(0x2E, 0x34, 0x3C)),
+            Margin = new Thickness(6, 4),
+        });
         toolbar.Children.Add(installBtn);
         toolbar.Children.Add(refreshBtn);
         toolbar.Children.Add(openFolderBtn);

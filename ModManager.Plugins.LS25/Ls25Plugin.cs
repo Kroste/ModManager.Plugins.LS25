@@ -15,9 +15,9 @@ public sealed class Ls25Plugin : IGameModPlugin
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.ls25",
         DisplayName: "Landwirtschafts-Simulator 25",
-        Version: "0.6.0",
+        Version: "0.7.0",
         Author: "Kroste",
-        Description: "Mod-Manager für den Landwirtschafts-Simulator 25 (FS25) — ModHub aggregiert GIANTS + Hof Hirschfeld + modhoster mit Cover-Bildern, Preview aus modDesc.xml (DDS→PNG), Backup/Restore, KI-Zusammenfassung via lokalem Ollama.");
+        Description: "Mod-Manager für Farming Simulator 25 — Spielstart via Steam, Detail-Dialog mit Screenshots + KI-Summary + Download, aggregierter ModHub, Backup/Restore, Preview (DDS→PNG).");
 
     public IReadOnlyList<GameTarget> Targets { get; } = new[]
     {

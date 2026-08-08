@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -39,7 +40,6 @@ public sealed partial class ModHubViewModel : ObservableObject
     private readonly List<ModHubEntry> _allEntries = new();
     private HashSet<string>? _seenSnapshot;
     private CancellationTokenSource? _fullLoadCts;
-    private CancellationTokenSource? _coverCts;
 
     public ModHubViewModel(ModHubService hub, HofHirschfeldCatalogService hof,
         ModhosterCatalogService modhoster, CatalogCache cache,
@@ -234,7 +234,7 @@ public sealed partial class ModHubViewModel : ObservableObject
     {
         int added = 0;
         var seen = new HashSet<string>(_allEntries.Select(e => e.DetailUrl), StringComparer.Ordinal);
-        var newRows = new List<CatalogRow>();
+        var missingCover = new List<CatalogRow>();
         foreach (var entry in entries)
         {
             if (!seen.Add(entry.DetailUrl)) continue;
@@ -243,12 +243,40 @@ public sealed partial class ModHubViewModel : ObservableObject
             if (RowMatchesFilter(row))
             {
                 Rows.Add(row);
-                newRows.Add(row);
+                // Cache-Hit: Bitmap SOFORT auf UI-Thread laden. Verhindert die
+                // Race, dass ApplyFilter die Row wegräumt bevor der async
+                // Cover-Load fertig ist.
+                if (!TryLoadCachedCover(row) && !string.IsNullOrWhiteSpace(row.Source.PreviewUrl))
+                    missingCover.Add(row);
             }
             added++;
         }
-        if (newRows.Count > 0) _ = LoadCoversForAsync(newRows);
+        if (missingCover.Count > 0) _ = LoadCoversForAsync(missingCover);
         return added;
+    }
+
+    /// <summary>Sync-Path: Cover aus dem File-Cache lesen und sofort auf die
+    /// Row setzen. Liefert true wenn Cover gesetzt wurde (Cache-Hit), false
+    /// wenn nachgeladen werden muss.</summary>
+    private bool TryLoadCachedCover(CatalogRow row)
+    {
+        if (string.IsNullOrWhiteSpace(row.Source.PreviewUrl)) return false;
+        var path = _previews.TryGetCachedCoverPath(row.Source.PreviewUrl);
+        if (path is null) return false;
+        try
+        {
+            using var s = File.OpenRead(path);
+            row.Cover = new Bitmap(s);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // Bewusst Warn statt Debug — auf Bazzite gab es Fälle wo Skia
+            // bestimmte JPEG-Varianten nicht lud; ohne Log sieht der User nur
+            // fehlende Cover und keinen Hinweis.
+            Log.Warn(ex, "Cover-Bitmap-Load fehlgeschlagen: {p}", path);
+            return false;
+        }
     }
 
     private async Task LoadCoversForAsync(List<CatalogRow> rows)
@@ -268,53 +296,26 @@ public sealed partial class ModHubViewModel : ObservableObject
                         using var s = File.OpenRead(path);
                         row.Cover = new Bitmap(s);
                     }
-                    catch (Exception ex) { Log.Debug(ex, "Cover-Bitmap-Load {p}", path); }
+                    catch (Exception ex) { Log.Warn(ex, "Cover-Bitmap-Load {p}", path); }
                 });
             }
-            catch (Exception ex) { Log.Debug(ex, "Cover-Load fehlgeschlagen: {u}", row.Source.PreviewUrl); }
+            catch (Exception ex) { Log.Warn(ex, "Cover-Load fehlgeschlagen: {u}", row.Source.PreviewUrl); }
         }
     }
 
     private void ApplyFilter()
     {
         Rows.Clear();
+        var missingCover = new List<CatalogRow>();
         foreach (var e in _allEntries)
         {
             var row = new CatalogRow(e) { IsNew = _seenSnapshot is not null && !_seenSnapshot.Contains(e.DetailUrl) };
-            if (RowMatchesFilter(row)) Rows.Add(row);
+            if (!RowMatchesFilter(row)) continue;
+            Rows.Add(row);
+            if (!TryLoadCachedCover(row) && !string.IsNullOrWhiteSpace(row.Source.PreviewUrl))
+                missingCover.Add(row);
         }
-        _ = LoadCoversAsync();
-    }
-
-    private async Task LoadCoversAsync()
-    {
-        _coverCts?.Cancel();
-        _coverCts = new CancellationTokenSource();
-        var ct = _coverCts.Token;
-        // Snapshot der Rows um Race gegen ApplyFilter zu vermeiden.
-        var snapshot = Rows.ToArray();
-        foreach (var row in snapshot)
-        {
-            if (ct.IsCancellationRequested) return;
-            if (row.Cover is not null) continue;
-            if (string.IsNullOrWhiteSpace(row.Source.PreviewUrl)) continue;
-            try
-            {
-                var path = await _previews.GetOrDownloadCoverAsync(row.Source.PreviewUrl, ct);
-                if (path is null || !File.Exists(path)) continue;
-                await Dispatcher.UIThread.InvokeAsync(() =>
-                {
-                    try
-                    {
-                        using var s = File.OpenRead(path);
-                        row.Cover = new Bitmap(s);
-                    }
-                    catch (Exception ex) { Log.Debug(ex, "Cover-Bitmap-Load {p}", path); }
-                });
-            }
-            catch (OperationCanceledException) { return; }
-            catch (Exception ex) { Log.Debug(ex, "Cover-Load fehlgeschlagen: {u}", row.Source.PreviewUrl); }
-        }
+        if (missingCover.Count > 0) _ = LoadCoversForAsync(missingCover);
     }
 
     private bool RowMatchesFilter(CatalogRow row)
@@ -342,14 +343,18 @@ public sealed partial class ModHubViewModel : ObservableObject
     private async Task DownloadSelectedAsync()
     {
         if (Selected is null || !Selected.Source.CanInAppDownload) return;
-        var modIdMatch = System.Text.RegularExpressions.Regex.Match(
-            Selected.Source.DetailUrl, @"mod_id=(\d+)");
-        if (!modIdMatch.Success)
+
+        int? modId = ExtractModId(Selected.Source.DetailUrl);
+        if (modId is null)
         {
-            _host.Notifications.Notify("Keine Mod-ID in URL erkennbar.", NotificationLevel.Warning);
+            Log.Warn("Download abgebrochen — kein mod_id aus URL extrahierbar: {url}",
+                Selected.Source.DetailUrl);
+            _host.Notifications.Notify(
+                $"Keine Mod-ID aus URL erkennbar: {Selected.Source.DetailUrl}",
+                NotificationLevel.Warning);
             return;
         }
-        int modId = int.Parse(modIdMatch.Groups[1].Value);
+        Log.Info("Starte Download: mod_id={id} · Titel={title}", modId, Selected.Source.Title);
 
         using var scope = _host.BeginProgress($"Download: {Selected.Source.Title}");
         var progress = new Progress<ModDownloadProgress>(p =>
@@ -359,7 +364,7 @@ public sealed partial class ModHubViewModel : ObservableObject
         });
         try
         {
-            var result = await _hub.DownloadModAsync(modId, Language, progress,
+            var result = await _hub.DownloadModAsync(modId.Value, Language, progress,
                 default, Selected.Source.PreviewUrl);
             if (result is null)
             {
@@ -370,9 +375,23 @@ public sealed partial class ModHubViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            Log.Warn(ex, "ModHub-Download fehlgeschlagen für {Title}", Selected.Source.Title);
+            Log.Warn(ex, "ModHub-Download fehlgeschlagen für {Title} (mod_id={Id})",
+                Selected.Source.Title, modId);
             _host.Notifications.Notify($"Fehler: {ex.Message}", NotificationLevel.Error);
         }
+    }
+
+    /// <summary>Extrahiert die mod_id aus einer GIANTS-Detail-URL. Robust gegen
+    /// URL-Varianten: <c>?mod_id=12345</c> (Standard) und <c>/12345/</c> (Legacy).</summary>
+    internal static int? ExtractModId(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        var m = System.Text.RegularExpressions.Regex.Match(url, @"mod_id=(\d+)");
+        if (m.Success && int.TryParse(m.Groups[1].Value, out var id)) return id;
+        // Legacy-Fallback: /modHub/mod/12345 o.ä.
+        m = System.Text.RegularExpressions.Regex.Match(url, @"/(\d{4,})/?(?:\?|$)");
+        if (m.Success && int.TryParse(m.Groups[1].Value, out id)) return id;
+        return null;
     }
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
@@ -380,6 +399,26 @@ public sealed partial class ModHubViewModel : ObservableObject
     {
         if (Selected is null) return;
         _host.Shell.OpenExternalUrl(Selected.Source.DetailUrl);
+    }
+
+    /// <summary>Öffnet den Detail-Dialog für GIANTS-Mods. Für die anderen
+    /// Quellen (Hof/modhoster) fällt das auf „Detail im Browser" zurück,
+    /// da diese Sites die Detail-Beschreibung nicht per HTTP herausgeben.</summary>
+    [RelayCommand(CanExecute = nameof(CanSummarizeSelected))]
+    private void ShowDetail()
+    {
+        if (Selected is null) return;
+        var modId = ExtractModId(Selected.Source.DetailUrl);
+        if (modId is null)
+        {
+            _host.Shell.OpenExternalUrl(Selected.Source.DetailUrl);
+            return;
+        }
+        var vm = new ModDetailViewModel(modId.Value, Selected, _hub, _previews, _aiFactory, _host);
+        var window = new ModDetailWindow { DataContext = vm };
+        var owner = (Avalonia.Application.Current?.ApplicationLifetime
+            as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+        if (owner is not null) window.Show(owner); else window.Show();
     }
 
     [RelayCommand(CanExecute = nameof(CanSummarizeSelected))]
@@ -395,10 +434,8 @@ public sealed partial class ModHubViewModel : ObservableObject
             return;
         }
 
-        var modIdMatch = System.Text.RegularExpressions.Regex.Match(
-            Selected.Source.DetailUrl, @"mod_id=(\d+)");
-        if (!modIdMatch.Success) return;
-        int modId = int.Parse(modIdMatch.Groups[1].Value);
+        int? modIdOpt = ExtractModId(Selected.Source.DetailUrl);
+        if (modIdOpt is not int modId) return;
 
         SummaryVisible = true;
         SummaryBusy = true;

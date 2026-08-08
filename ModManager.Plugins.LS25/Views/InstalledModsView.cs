@@ -35,10 +35,12 @@ public sealed class InstalledModsView : UserControl
 
     private static Control BuildToolbar()
     {
-        // SPIEL: Starten
+        // SPIEL: Starten + Updates prüfen
         var launchBtn = new Button { Content = "▶  LS25 starten" };
         launchBtn.Classes.Add("accent");
         launchBtn.Bind(Button.CommandProperty, new Binding(nameof(InstalledModsViewModel.LaunchGameCommand)));
+        var updatesBtn = new Button { Content = "🔄  Updates prüfen" };
+        updatesBtn.Bind(Button.CommandProperty, new Binding(nameof(InstalledModsViewModel.CheckUpdatesCommand)));
 
         // INSTALLATION: ZIP installieren + Refresh + Toggle + Uninstall
         var installBtn = new Button { Content = "📁  ZIP installieren…" };
@@ -66,6 +68,7 @@ public sealed class InstalledModsView : UserControl
             Margin = new Thickness(0, 0, 0, 10),
         };
         toolbar.Children.Add(launchBtn);
+        toolbar.Children.Add(updatesBtn);
         toolbar.Children.Add(NewDivider());
         toolbar.Children.Add(installBtn);
         toolbar.Children.Add(refreshBtn);
@@ -168,6 +171,24 @@ public sealed class InstalledModsView : UserControl
         enabledBadge.Bind(Border.IsVisibleProperty, new Binding(nameof(ModRow.IsEnabled)));
         titleRow.Children.Add(enabledBadge);
 
+        // Update-Badge (gold) — nur sichtbar wenn HasUpdate true.
+        var updateBadge = new Border
+        {
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(8, 1),
+            VerticalAlignment = VerticalAlignment.Center,
+            [!Border.BackgroundProperty] = new DynamicResourceExtension("KrosteGoldBrush"),
+        };
+        var updateBadgeText = new TextBlock
+        {
+            FontSize = 10, FontWeight = FontWeight.SemiBold,
+            Foreground = Brushes.Black,
+        };
+        updateBadgeText.Bind(TextBlock.TextProperty, new Binding(nameof(ModRow.UpdateBadgeText)));
+        updateBadge.Child = updateBadgeText;
+        updateBadge.Bind(Border.IsVisibleProperty, new Binding(nameof(ModRow.HasUpdate)));
+        titleRow.Children.Add(updateBadge);
+
         // Meta: Author · vX.Y · Größe
         var meta = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 2, 0, 0) };
         void AddMuted(Binding b, string? fmt = null)
@@ -192,11 +213,25 @@ public sealed class InstalledModsView : UserControl
             Children = { titleRow, meta },
         };
 
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
+        // Update-Button rechts — nur sichtbar bei HasUpdate.
+        var updateBtn = new Button { Content = "⬆  Update" };
+        updateBtn.Classes.Add("accent");
+        updateBtn.VerticalAlignment = VerticalAlignment.Center;
+        updateBtn.Bind(Button.CommandProperty, new Binding
+        {
+            RelativeSource = new RelativeSource { Mode = RelativeSourceMode.FindAncestor, AncestorType = typeof(ListBox) },
+            Path = "DataContext." + nameof(InstalledModsViewModel.UpdateModCommand),
+        });
+        updateBtn.Bind(Button.CommandParameterProperty, new Binding("."));
+        updateBtn.Bind(Button.IsVisibleProperty, new Binding(nameof(ModRow.HasUpdate)));
+
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
         Grid.SetColumn(coverFrame, 0);
         Grid.SetColumn(textStack, 1);
+        Grid.SetColumn(updateBtn, 2);
         grid.Children.Add(coverFrame);
         grid.Children.Add(textStack);
+        grid.Children.Add(updateBtn);
 
         var card = new Border { Margin = new Thickness(0, 0, 0, 8), Child = grid };
         card.Classes.Add("card");

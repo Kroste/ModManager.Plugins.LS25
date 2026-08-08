@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
@@ -15,18 +16,25 @@ namespace ModManager.Plugins.LS25.Views;
 
 public sealed partial class InstalledModsViewModel : ObservableObject
 {
+    private const string Language = "de";
+
     private readonly ModInstallService _installer;
     private readonly ModBackupService _backup;
     private readonly ModPreviewService _previews;
+    private readonly ModHubService _hub;
+    private readonly CatalogCache _cache;
     private readonly Ls25Paths _paths;
     private readonly IHostServices _host;
 
     public InstalledModsViewModel(ModInstallService installer, ModBackupService backup,
-        ModPreviewService previews, Ls25Paths paths, IHostServices host)
+        ModPreviewService previews, ModHubService hub, CatalogCache cache,
+        Ls25Paths paths, IHostServices host)
     {
         _installer = installer;
         _backup = backup;
         _previews = previews;
+        _hub = hub;
+        _cache = cache;
         _paths = paths;
         _host = host;
         ModsDir = installer.ModsDir;
@@ -42,6 +50,9 @@ public sealed partial class InstalledModsViewModel : ObservableObject
     private ModRow? _selected;
 
     public bool HasSelection => Selected is not null;
+
+    [ObservableProperty]
+    private bool _isCheckingUpdates;
 
     [ObservableProperty]
     private string _summary = "";
@@ -170,6 +181,171 @@ public sealed partial class InstalledModsViewModel : ObservableObject
     [RelayCommand]
     private void OpenModsFolder() => _host.Shell.OpenDirectory(ModsDir);
 
+    /// <summary>Prüft für jeden installierten Mod, ob im Katalog eine neuere
+    /// Version steht. Fuzzy-Match Filename ↔ Katalog-Titel. Läuft nicht
+    /// automatisch — User klickt „Updates prüfen".</summary>
+    [RelayCommand]
+    private async Task CheckUpdatesAsync()
+    {
+        if (IsCheckingUpdates) return;
+        IsCheckingUpdates = true;
+        try
+        {
+            var snapshot = _cache.Load(Language);
+            if (snapshot is null || snapshot.Entries.Count == 0)
+            {
+                _host.Notifications.Notify(
+                    "Kein Katalog-Cache vorhanden. Erst ModHub-Tab öffnen, damit der Katalog geladen wird.",
+                    NotificationLevel.Warning);
+                return;
+            }
+
+            var mods = Mods.ToList();
+            int checkedCount = 0, updatedCount = 0;
+            foreach (var row in mods)
+            {
+                var installedVersion = row.Version;
+                if (string.IsNullOrWhiteSpace(installedVersion)) continue;
+
+                var catalogEntry = LookupCatalogEntry(snapshot.Entries, row.FileName);
+                if (catalogEntry is null) continue;
+                var modId = ExtractModIdFromUrl(catalogEntry.DetailUrl);
+                if (modId is null) continue;
+
+                checkedCount++;
+                Summary = $"Prüfe Updates: {checkedCount} · {row.Title}";
+                try
+                {
+                    var detail = await _hub.FetchModDetailAsync(modId.Value, Language);
+                    if (detail is null || string.IsNullOrWhiteSpace(detail.Version)) continue;
+                    if (IsVersionNewer(detail.Version, installedVersion))
+                    {
+                        row.SetUpdateAvailable(detail.Version);
+                        updatedCount++;
+                        _host.Logger.Info("LS25: Update verfügbar {Title}: {Old} → {New}",
+                            row.Title, installedVersion, detail.Version);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _host.Logger.Debug(ex, "Update-Check für {Title} fehlgeschlagen", row.Title);
+                }
+            }
+            Summary = updatedCount > 0
+                ? $"Updates gefunden: {updatedCount} von {checkedCount} geprüften Mods."
+                : $"Keine Updates. {checkedCount} Mods geprüft.";
+            _host.Notifications.Notify(Summary,
+                updatedCount > 0 ? NotificationLevel.Success : NotificationLevel.Info);
+        }
+        catch (Exception ex)
+        {
+            _host.Logger.Warn(ex, "LS25: Update-Prüfung fehlgeschlagen");
+            _host.Notifications.Notify($"Update-Prüfung: {ex.Message}", NotificationLevel.Error);
+        }
+        finally
+        {
+            IsCheckingUpdates = false;
+        }
+    }
+
+    /// <summary>Führt das Update aus: lädt neue Version, deinstalliert die alte,
+    /// installiert die neue, überträgt Enabled-State. Voraussetzung: <see cref="ModRow.HasUpdate"/>
+    /// ist true (per <see cref="CheckUpdatesAsync"/> gesetzt) und Katalog-Entry
+    /// findet sich noch.</summary>
+    [RelayCommand]
+    private async Task UpdateModAsync(ModRow? row)
+    {
+        if (row is null || !row.HasUpdate) return;
+
+        var snapshot = _cache.Load(Language);
+        if (snapshot is null) return;
+        var catalogEntry = LookupCatalogEntry(snapshot.Entries, row.FileName);
+        if (catalogEntry is null)
+        {
+            _host.Notifications.Notify("Katalog-Eintrag für Update nicht mehr gefunden.", NotificationLevel.Warning);
+            return;
+        }
+        var modId = ExtractModIdFromUrl(catalogEntry.DetailUrl);
+        if (modId is null) return;
+
+        using var scope = _host.BeginProgress($"Update: {row.Title}");
+        var progress = new Progress<ModDownloadProgress>(p =>
+            scope.Report(p.Fraction ?? 0, p.FormatShort()));
+
+        try
+        {
+            var wasEnabled = row.Source.IsEnabled;
+
+            // 1. Neue Version in den Downloads-Ordner
+            var result = await _hub.DownloadModAsync(modId.Value, Language, progress,
+                default, catalogEntry.PreviewUrl);
+            if (result is null) throw new InvalidOperationException("Download lieferte null");
+
+            // 2. Alte Version aus dem Mod-Ordner entfernen
+            await Task.Run(() => _installer.Uninstall(row.Source));
+
+            // 3. Neue Version installieren (aus dem Downloads-Ordner)
+            var newMod = await Task.Run(() => _installer.Install(result.TargetZipPath, overwrite: true));
+
+            // 4. Enabled-State übertragen — war die alte deaktiviert, deaktivieren wir die neue ebenfalls.
+            if (!wasEnabled)
+                await Task.Run(() => _installer.SetEnabled(newMod, false));
+
+            _host.Notifications.Notify($"Update installiert: {row.Title} → v{row.LatestVersion}",
+                NotificationLevel.Success);
+            Refresh();
+        }
+        catch (Exception ex)
+        {
+            _host.Logger.Warn(ex, "LS25: Update-Install fehlgeschlagen für {Title}", row.Title);
+            _host.Notifications.Notify($"Update-Fehler: {ex.Message}", NotificationLevel.Error);
+        }
+    }
+
+    /// <summary>Fuzzy-Match: normalisiere Filename + Katalog-Titel (nur
+    /// Buchstaben/Ziffern, lowercase, ohne LS/FS-Präfixe). Enthält der eine den
+    /// anderen als Teilstring, ist es ein Treffer. Analog zum LS-ModManager,
+    /// funktioniert für die meisten Mod-Filenamen.</summary>
+    private static ModHubEntry? LookupCatalogEntry(IReadOnlyList<ModHubEntry> catalog, string zipFileName)
+    {
+        var normalized = NormalizeForMatch(Path.GetFileNameWithoutExtension(zipFileName));
+        if (normalized.Length < 3) return null;
+        foreach (var e in catalog)
+        {
+            var titleNorm = NormalizeForMatch(e.Title);
+            if (titleNorm.Length < 3) continue;
+            if (normalized.Contains(titleNorm) || titleNorm.Contains(normalized))
+                return e;
+        }
+        return null;
+    }
+
+    private static string NormalizeForMatch(string s)
+    {
+        var sb = new System.Text.StringBuilder(s.Length);
+        foreach (var c in s)
+            if (char.IsLetterOrDigit(c)) sb.Append(char.ToLowerInvariant(c));
+        var result = sb.ToString();
+        foreach (var prefix in new[] { "fs25", "fs22", "ls25", "ls22" })
+            if (result.StartsWith(prefix)) result = result.Substring(prefix.Length);
+        // .disabled kann noch dranhängen wenn der Filename via ZipFileName rein kommt.
+        if (result.EndsWith("disabled")) result = result.Substring(0, result.Length - "disabled".Length);
+        return result;
+    }
+
+    private static int? ExtractModIdFromUrl(string url)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(url, @"mod_id=(\d+)");
+        return m.Success && int.TryParse(m.Groups[1].Value, out var id) ? id : null;
+    }
+
+    private static bool IsVersionNewer(string catalogVersion, string installedVersion)
+    {
+        if (!Version.TryParse(catalogVersion.Trim(), out var cat)) return false;
+        if (!Version.TryParse(installedVersion.Trim(), out var inst)) return false;
+        return cat > inst;
+    }
+
     /// <summary>Startet Farming Simulator 25 über das Steam-Protokoll
     /// <c>steam://run/2300320</c>. Funktioniert Windows + Linux (dort geht
     /// Steam an das Proton-Prefix). Wenn Steam nicht installiert ist, gibt
@@ -290,6 +466,23 @@ public sealed partial class ModRow : ObservableObject
 
     [ObservableProperty]
     private Bitmap? _preview;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(UpdateBadgeText))]
+    private bool _hasUpdate;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(UpdateBadgeText))]
+    private string? _latestVersion;
+
+    public string UpdateBadgeText =>
+        HasUpdate && LatestVersion is not null ? $"⬆ Update v{LatestVersion}" : "";
+
+    public void SetUpdateAvailable(string catalogVersion)
+    {
+        LatestVersion = catalogVersion;
+        HasUpdate = true;
+    }
 
     private static string FormatBytes(long bytes)
     {

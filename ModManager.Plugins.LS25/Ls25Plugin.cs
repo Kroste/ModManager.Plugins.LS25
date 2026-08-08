@@ -15,9 +15,9 @@ public sealed class Ls25Plugin : IGameModPlugin
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.ls25",
         DisplayName: "Landwirtschafts-Simulator 25",
-        Version: "0.7.1",
+        Version: "0.7.2",
         Author: "Kroste",
-        Description: "Mod-Manager für Farming Simulator 25 — Kroste-Card-Look nach Vorbild des standalone LS-ModManagers. Spielstart via Steam, Detail-Dialog mit Screenshots + KI-Summary + Download, aggregierter ModHub, Backup/Restore, Preview (DDS→PNG).");
+        Description: "Mod-Manager für Farming Simulator 25 — Kroste-Card-Look. Spielstart via Steam, Mod-Updates prüfen + einspielen, Detail-Dialog mit Screenshots + KI-Summary + Download, aggregierter ModHub, Backup/Restore, Preview (DDS→PNG).");
 
     public IReadOnlyList<GameTarget> Targets { get; } = new[]
     {
@@ -88,7 +88,7 @@ public sealed class Ls25Plugin : IGameModPlugin
             || !_backups.TryGetValue(game.Target.GameId, out var backup))
             yield break;
 
-        yield return new InstalledTab(installer, backup, _previews, _paths, _host);
+        yield return new InstalledTab(installer, backup, _previews, _hub, _cache, _paths, _host);
         yield return new ModHubTab(_hub, _hofHirschfeld, _modhoster, _cache, installer,
             _previews, CreateAiProviderFromSettings, _host);
         yield return new DownloadsTab(installer, _host);
@@ -109,18 +109,21 @@ public sealed class Ls25Plugin : IGameModPlugin
         private readonly ModInstallService _installer;
         private readonly ModBackupService _backup;
         private readonly ModPreviewService _previews;
+        private readonly ModHubService _hub;
+        private readonly CatalogCache _cache;
         private readonly Ls25Paths _paths;
         private readonly IHostServices _host;
         public InstalledTab(ModInstallService installer, ModBackupService backup,
-            ModPreviewService previews, Ls25Paths paths, IHostServices host)
-        { _installer = installer; _backup = backup; _previews = previews; _paths = paths; _host = host; }
+            ModPreviewService previews, ModHubService hub, CatalogCache cache,
+            Ls25Paths paths, IHostServices host)
+        { _installer = installer; _backup = backup; _previews = previews; _hub = hub; _cache = cache; _paths = paths; _host = host; }
         public string Id => "installed";
         public string Label => "Installiert";
         public string Icon => "\U0001F69C";
         public int Order => 0;
         public bool IsVisible(DetectedGame game) => true;
         public Control CreateView(DetectedGame game, IHostServices host) =>
-            new InstalledModsView { DataContext = new InstalledModsViewModel(_installer, _backup, _previews, _paths, _host) };
+            new InstalledModsView { DataContext = new InstalledModsViewModel(_installer, _backup, _previews, _hub, _cache, _paths, _host) };
     }
 
     private sealed class ModHubTab : IGameTabContribution

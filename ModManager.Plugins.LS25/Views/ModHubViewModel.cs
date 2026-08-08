@@ -34,6 +34,7 @@ public sealed partial class ModHubViewModel : ObservableObject
     private readonly CatalogCache _cache;
     private readonly ModInstallService _installer;
     private readonly ModPreviewService _previews;
+    private readonly Ls25SettingsService _settings;
     private readonly Func<IAiProvider?> _aiFactory;
     private readonly IHostServices _host;
 
@@ -44,7 +45,7 @@ public sealed partial class ModHubViewModel : ObservableObject
     public ModHubViewModel(ModHubService hub, HofHirschfeldCatalogService hof,
         ModhosterCatalogService modhoster, CatalogCache cache,
         ModInstallService installer, ModPreviewService previews,
-        Func<IAiProvider?> aiFactory, IHostServices host)
+        Ls25SettingsService settings, Func<IAiProvider?> aiFactory, IHostServices host)
     {
         _hub = hub;
         _hof = hof;
@@ -52,6 +53,7 @@ public sealed partial class ModHubViewModel : ObservableObject
         _cache = cache;
         _installer = installer;
         _previews = previews;
+        _settings = settings;
         _aiFactory = aiFactory;
         _host = host;
 
@@ -133,11 +135,32 @@ public sealed partial class ModHubViewModel : ObservableObject
         if (snapshot is not null)
         {
             await AddEntriesBatchedAsync(snapshot.Entries);
-            Status = $"{Rows.Count} Mods aus Cache (Alter: {(int)(DateTime.UtcNow - snapshot.SavedUtc).TotalHours} h).";
+            var ageH = (int)(DateTime.UtcNow - snapshot.SavedUtc).TotalHours;
+            Status = $"{Rows.Count} Mods aus Cache (Alter: {ageH} h).";
         }
 
         _ = LoadCategoriesAsync();
-        await RefreshCatalogAsync();
+
+        // Nur refreshen wenn Cache abgelaufen (analog LS-ModManager). User kann
+        // manuell via „Katalog neu laden"-Button erzwingen — RefreshCatalog-
+        // Command bypasst diesen Check.
+        var maxAge = TimeSpan.FromHours(Math.Max(0, _settings.Current.CatalogRefreshHours));
+        var cacheStale = snapshot is null
+            || snapshot.Entries.Count == 0
+            || DateTime.UtcNow - snapshot.SavedUtc > maxAge;
+        if (cacheStale)
+        {
+            Log.Info("Katalog-Cache abgelaufen ({age}h > {max}h) — Full-Load startet",
+                snapshot is null ? 0 : (int)(DateTime.UtcNow - snapshot.SavedUtc).TotalHours,
+                _settings.Current.CatalogRefreshHours);
+            await RefreshCatalogAsync();
+        }
+        else
+        {
+            Log.Info("Katalog-Cache ist frisch ({age}h < {max}h) — kein Refresh",
+                (int)(DateTime.UtcNow - snapshot!.SavedUtc).TotalHours,
+                _settings.Current.CatalogRefreshHours);
+        }
     }
 
     /// <summary>Fügt Rows in Batches à 200 in die ObservableCollection ein und

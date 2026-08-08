@@ -73,4 +73,9 @@ public sealed class Ls25Settings
 {
     public string OllamaEndpoint { get; set; } = "http://localhost:11434";
     public string OllamaModel { get; set; } = "llama3.2";
+
+    /// <summary>Ab welchem Cache-Alter der ModHub-Katalog beim App-Start
+    /// erneut geladen wird (in Stunden). 0 = immer neu laden. Standalone-
+    /// Default und hier: 24 h. Manueller Refresh-Button umgeht den Check.</summary>
+    public int CatalogRefreshHours { get; set; } = 24;
 }

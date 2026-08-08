@@ -15,7 +15,7 @@ public sealed class Ls25Plugin : IGameModPlugin
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.ls25",
         DisplayName: "Landwirtschafts-Simulator 25",
-        Version: "0.7.8",
+        Version: "0.7.9",
         Author: "Kroste",
         Description: "Mod-Manager für Farming Simulator 25 — Kroste-Card-Look. Per-Row-Buttons (Update/Toggle/Uninstall bzw. Install/Löschen), Cover in Downloads-Tab, INSTALLIERT- und ⭐ EMPFOHLEN-Badges. Spielstart via Steam, Mod-Updates, Detail-Dialog, aggregierter ModHub, Backup/Restore.");
 
@@ -90,7 +90,7 @@ public sealed class Ls25Plugin : IGameModPlugin
 
         yield return new InstalledTab(installer, backup, _previews, _hub, _cache, _paths, _host);
         yield return new ModHubTab(_hub, _hofHirschfeld, _modhoster, _cache, installer,
-            _previews, CreateAiProviderFromSettings, _host);
+            _previews, _settings, CreateAiProviderFromSettings, _host);
         yield return new DownloadsTab(installer, _previews, _host);
         yield return new SettingsTab(_settings, _host);
     }
@@ -134,20 +134,21 @@ public sealed class Ls25Plugin : IGameModPlugin
         private readonly CatalogCache _cache;
         private readonly ModInstallService _installer;
         private readonly ModPreviewService _previews;
+        private readonly Ls25SettingsService _settings;
         private readonly Func<IAiProvider?> _aiFactory;
         private readonly IHostServices _host;
         public ModHubTab(ModHubService hub, HofHirschfeldCatalogService hof,
             ModhosterCatalogService modhoster, CatalogCache cache,
             ModInstallService installer, ModPreviewService previews,
-            Func<IAiProvider?> aiFactory, IHostServices host)
-        { _hub = hub; _hof = hof; _modhoster = modhoster; _cache = cache; _installer = installer; _previews = previews; _aiFactory = aiFactory; _host = host; }
+            Ls25SettingsService settings, Func<IAiProvider?> aiFactory, IHostServices host)
+        { _hub = hub; _hof = hof; _modhoster = modhoster; _cache = cache; _installer = installer; _previews = previews; _settings = settings; _aiFactory = aiFactory; _host = host; }
         public string Id => "modhub";
         public string Label => "ModHub";
         public string Icon => "\U0001F3EA"; // 🏪
         public int Order => 10;
         public bool IsVisible(DetectedGame game) => true;
         public Control CreateView(DetectedGame game, IHostServices host) =>
-            new ModHubView { DataContext = new ModHubViewModel(_hub, _hof, _modhoster, _cache, _installer, _previews, _aiFactory, _host) };
+            new ModHubView { DataContext = new ModHubViewModel(_hub, _hof, _modhoster, _cache, _installer, _previews, _settings, _aiFactory, _host) };
     }
 
     private sealed class DownloadsTab : IGameTabContribution

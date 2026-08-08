@@ -15,9 +15,9 @@ public sealed class Ls25Plugin : IGameModPlugin
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.ls25",
         DisplayName: "Landwirtschafts-Simulator 25",
-        Version: "0.7.0",
+        Version: "0.7.1",
         Author: "Kroste",
-        Description: "Mod-Manager für Farming Simulator 25 — Spielstart via Steam, Detail-Dialog mit Screenshots + KI-Summary + Download, aggregierter ModHub, Backup/Restore, Preview (DDS→PNG).");
+        Description: "Mod-Manager für Farming Simulator 25 — Kroste-Card-Look nach Vorbild des standalone LS-ModManagers. Spielstart via Steam, Detail-Dialog mit Screenshots + KI-Summary + Download, aggregierter ModHub, Backup/Restore, Preview (DDS→PNG).");
 
     public IReadOnlyList<GameTarget> Targets { get; } = new[]
     {

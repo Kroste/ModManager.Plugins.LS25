@@ -5,22 +5,45 @@ using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Data.Converters;
 using Avalonia.Layout;
+using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using ModManager.Plugins.LS25.Services;
 
 namespace ModManager.Plugins.LS25.Views;
 
+/// <summary>
+/// ModHub-Katalog-Tab im Kroste-Card-Look — nahe am standalone LS-ModManager.
+/// Wichtig: keine hartkodierten Farben mehr, alles über DynamicResource
+/// (KrosteCardBrush, KrosteBorderBrush, KrosteAccent*, KrosteGold, KrosteMuted/
+/// SecondaryText) und die Style-Klassen aus dem Host-App.axaml
+/// (Border.card, Button.accent/.ghost, TextBlock.h2/.muted/.section-label,
+/// Rectangle.divider-v).
+/// </summary>
 public sealed class ModHubView : UserControl
 {
     public ModHubView()
     {
-        // Toolbar: Quelle-Filter + Kategorie-Filter + Suche + Refresh + Aktionen.
-        // Quellen: „Alle" / GIANTS / Hof Hirschfeld / modhoster — im Prinzip wie
-        // im standalone LS-ModManager (dort implizit über Sort/Filter).
+        Content = new DockPanel
+        {
+            Margin = new Thickness(20, 16, 20, 14),
+            Children =
+            {
+                WithDock(BuildToolbar(),   Dock.Top),
+                WithDock(BuildHint(),      Dock.Top),
+                WithDock(BuildSummary(),   Dock.Top),
+                WithDock(BuildStatus(),    Dock.Bottom),
+                BuildList(),
+            },
+        };
+    }
+
+    private static Control BuildToolbar()
+    {
         var sourceBox = new ComboBox
         {
             Width = 170,
+            [!ComboBox.PlaceholderTextProperty] = new Binding { Source = "Alle Quellen" },
             DisplayMemberBinding = new Binding(nameof(SourceFilterOption.Label)),
         };
         sourceBox.Bind(ComboBox.ItemsSourceProperty, new Binding(nameof(ModHubViewModel.Sources)));
@@ -30,6 +53,7 @@ public sealed class ModHubView : UserControl
         var categoryBox = new ComboBox
         {
             Width = 220,
+            [!ComboBox.PlaceholderTextProperty] = new Binding { Source = "Alle Kategorien" },
             DisplayMemberBinding = new Binding(nameof(ModHubCategory.Label)),
         };
         categoryBox.Bind(ComboBox.ItemsSourceProperty, new Binding(nameof(ModHubViewModel.Categories)));
@@ -38,256 +62,256 @@ public sealed class ModHubView : UserControl
 
         var searchBox = new TextBox
         {
-            Width = 220,
-            [!TextBox.PlaceholderTextProperty] = new Binding
-            {
-                Source = "Titel/Autor/Kategorie …",
-            },
+            Width = 240,
+            [!TextBox.PlaceholderTextProperty] = new Binding { Source = "Titel/Autor/Kategorie …" },
         };
         searchBox.Bind(TextBox.TextProperty, new Binding(nameof(ModHubViewModel.SearchText))
         { Mode = BindingMode.TwoWay });
 
-        var refreshBtn = new Button { Content = "🔄  Katalog neu laden" };
+        var refreshBtn = new Button { Content = "↺  Katalog neu laden" };
+        refreshBtn.Classes.Add("ghost");
         refreshBtn.Bind(Button.CommandProperty, new Binding(nameof(ModHubViewModel.RefreshCatalogCommand)));
 
-        var downloadBtn = new Button { Content = "⬇  Download" };
-        downloadBtn.Classes.Add("accent");
-        downloadBtn.Bind(Button.CommandProperty, new Binding(nameof(ModHubViewModel.DownloadSelectedCommand)));
-        // Nur sichtbar bei GIANTS-Rows (In-App-Download möglich).
-        downloadBtn.Bind(Button.IsVisibleProperty, new Binding(nameof(ModHubViewModel.CanDownloadSelected)));
-
-        var detailBtn = new Button { Content = "🌐  Detail im Browser" };
-        detailBtn.Bind(Button.CommandProperty, new Binding(nameof(ModHubViewModel.OpenDetailInBrowserCommand)));
-
-        // Details-Fenster — nur bei GIANTS (der Detail-Endpoint ist frei zugänglich).
-        var detailsBtn = new Button { Content = "👁  Details" };
-        detailsBtn.Bind(Button.CommandProperty, new Binding(nameof(ModHubViewModel.ShowDetailCommand)));
-        detailsBtn.Bind(Button.IsVisibleProperty, new Binding(nameof(ModHubViewModel.CanSummarizeSelected)));
-
-        // KI-Zusammenfassung im Panel oberhalb der Liste (Kurzform ohne Detail-Fenster).
-        var summarizeBtn = new Button { Content = "🤖  Kurzfassung" };
-        summarizeBtn.Bind(Button.CommandProperty, new Binding(nameof(ModHubViewModel.SummarizeSelectedCommand)));
-        summarizeBtn.Bind(Button.IsVisibleProperty, new Binding(nameof(ModHubViewModel.CanSummarizeSelected)));
-
-        var toolbar = new StackPanel
+        var left = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 8,
-            Margin = new Thickness(0, 0, 0, 12),
+            Children = { sourceBox, categoryBox, searchBox, refreshBtn },
         };
-        toolbar.Children.Add(sourceBox);
-        toolbar.Children.Add(categoryBox);
-        toolbar.Children.Add(searchBox);
-        toolbar.Children.Add(refreshBtn);
-        toolbar.Children.Add(new Rectangle
-        {
-            Width = 1, Fill = new SolidColorBrush(Color.FromRgb(0x2E, 0x34, 0x3C)),
-            Margin = new Thickness(6, 4),
-        });
-        toolbar.Children.Add(downloadBtn);
-        toolbar.Children.Add(detailBtn);
-        toolbar.Children.Add(detailsBtn);
-        toolbar.Children.Add(summarizeBtn);
 
+        // Rechts: Sortier-Label. Die Sortier-Combo kommt in v0.8 (aktuell
+        // keine Sortier-Optionen im VM — ohne Options wäre der Dropdown-
+        // Widget ein Fake, deshalb erstmal nur Label als Platzhalter.)
+        var sortLabel = new TextBlock
+        {
+            Text = "Sortierung: Standard",
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        sortLabel.Classes.Add("muted");
+
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 0, 0, 10) };
+        Grid.SetColumn(left, 0);
+        Grid.SetColumn(sortLabel, 1);
+        grid.Children.Add(left);
+        grid.Children.Add(sortLabel);
+        return grid;
+    }
+
+    private static Control BuildHint()
+    {
         var hint = new TextBlock
         {
-            Text = "GIANTS ModHub: In-App-Download · Hof Hirschfeld & modhoster: Detail-Klick öffnet die Seite im Browser (Consent-Overlay bzw. Login-Pflicht).",
-            Opacity = 0.65,
+            Text = "GIANTS: In-App-Download · Hof Hirschfeld & modhoster: Detail-Klick öffnet die Seite im Browser (Consent-Overlay bzw. Login-Pflicht).",
             FontSize = 11,
-            Margin = new Thickness(0, 0, 0, 10),
             TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 8),
         };
+        hint.Classes.Add("muted");
+        return hint;
+    }
 
-        var list = new ListBox
-        {
-            Background = new SolidColorBrush(Color.FromRgb(0x1F, 0x23, 0x28)),
-            BorderThickness = new Thickness(1),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(0x2E, 0x34, 0x3C)),
-            CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(4),
-        };
-        list.Bind(ListBox.ItemsSourceProperty, new Binding(nameof(ModHubViewModel.Rows)));
-        list.Bind(ListBox.SelectedItemProperty, new Binding(nameof(ModHubViewModel.Selected))
-        { Mode = BindingMode.TwoWay });
-        list.ItemTemplate = new FuncDataTemplate<CatalogRow>((row, _) =>
-        {
-            if (row is null) return null;
-
-            // Cover-Frame 120×80 (GIANTS/Hof/modhoster liefern meist Landscape).
-            var coverFrame = new Border
-            {
-                Width = 120, Height = 80,
-                Background = new SolidColorBrush(Color.FromRgb(0x2A, 0x2F, 0x38)),
-                CornerRadius = new CornerRadius(4),
-                ClipToBounds = true,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            var coverPanel = new Panel();
-            coverPanel.Children.Add(new TextBlock
-            {
-                Text = "🌐",
-                FontSize = 24,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-                Opacity = 0.55,
-            });
-            var coverImage = new Image { Stretch = Stretch.UniformToFill };
-            coverImage.Bind(Image.SourceProperty, new Binding(nameof(CatalogRow.Cover)));
-            coverPanel.Children.Add(coverImage);
-            coverFrame.Child = coverPanel;
-
-            var titleGrid = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-            var title = new TextBlock
-            {
-                FontWeight = FontWeight.SemiBold,
-                Foreground = new SolidColorBrush(Color.FromRgb(0xE4, 0xE7, 0xEC)),
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            title.Bind(TextBlock.TextProperty, new Binding(nameof(CatalogRow.Title)));
-
-            var sourceBadge = new Border
-            {
-                Background = new SolidColorBrush(Color.FromRgb(0x33, 0x39, 0x44)),
-                CornerRadius = new CornerRadius(3),
-                Padding = new Thickness(6, 1),
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            var sourceBadgeText = new TextBlock
-            {
-                Foreground = new SolidColorBrush(Color.FromRgb(0xB0, 0xB6, 0xC0)),
-                FontSize = 10,
-                FontWeight = FontWeight.SemiBold,
-            };
-            sourceBadgeText.Bind(TextBlock.TextProperty, new Binding(nameof(CatalogRow.SourceLabel)));
-            sourceBadge.Child = sourceBadgeText;
-
-            var newBadge = new Border
-            {
-                Background = new SolidColorBrush(Color.FromRgb(0xE0, 0xB1, 0x4C)),
-                CornerRadius = new CornerRadius(3),
-                Padding = new Thickness(6, 1),
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            newBadge.Bind(Border.IsVisibleProperty, new Binding(nameof(CatalogRow.IsNew)));
-            newBadge.Child = new TextBlock
-            {
-                Text = "NEU",
-                Foreground = Brushes.Black,
-                FontSize = 10,
-                FontWeight = FontWeight.Bold,
-            };
-
-            titleGrid.Children.Add(title);
-            titleGrid.Children.Add(sourceBadge);
-            titleGrid.Children.Add(newBadge);
-
-            var meta = new TextBlock { Opacity = 0.75, FontSize = 11 };
-            meta.Bind(TextBlock.TextProperty, new MultiBinding
-            {
-                Bindings =
-                {
-                    new Binding(nameof(CatalogRow.Author)),
-                    new Binding(nameof(CatalogRow.Category)),
-                    new Binding(nameof(CatalogRow.Version)),
-                    new Binding(nameof(CatalogRow.SizeText)),
-                },
-                Converter = new JoinConverter(),
-            });
-
-            var textStack = new StackPanel
-            {
-                Spacing = 2,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(12, 0, 0, 0),
-                Children = { titleGrid, meta },
-            };
-            var grid = new Grid
-            {
-                ColumnDefinitions = new ColumnDefinitions("Auto,*"),
-                Margin = new Thickness(6),
-            };
-            Grid.SetColumn(coverFrame, 0);
-            Grid.SetColumn(textStack, 1);
-            grid.Children.Add(coverFrame);
-            grid.Children.Add(textStack);
-            return grid;
-        }, supportsRecycling: true);
-
-        var status = new TextBlock { Margin = new Thickness(0, 8, 0, 0), Opacity = 0.85 };
-        status.Bind(TextBlock.TextProperty, new Binding(nameof(ModHubViewModel.Status)));
-
-        // Summary-Panel für KI-Zusammenfassung, dockt oben an die Liste. Sichtbar
-        // via SummaryVisible-Flag; Close-Button setzt es zurück.
-        var summaryHeader = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8,
-        };
-        summaryHeader.Children.Add(new TextBlock
+    private static Control BuildSummary()
+    {
+        var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var label = new TextBlock
         {
             Text = "🤖  KI-Zusammenfassung",
-            FontWeight = FontWeight.SemiBold,
             VerticalAlignment = VerticalAlignment.Center,
-        });
+        };
+        label.Classes.Add("h2");
         var closeBtn = new Button { Content = "✕", Padding = new Thickness(8, 2) };
+        closeBtn.Classes.Add("ghost");
         closeBtn.Bind(Button.CommandProperty, new Binding(nameof(ModHubViewModel.CloseSummaryCommand)));
-        summaryHeader.Children.Add(closeBtn);
+        header.Children.Add(label);
+        header.Children.Add(closeBtn);
 
-        var summaryText = new TextBlock
+        var text = new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 6, 0, 0),
             LineHeight = 20,
         };
-        summaryText.Bind(TextBlock.TextProperty, new Binding(nameof(ModHubViewModel.SummaryText)));
+        text.Bind(TextBlock.TextProperty, new Binding(nameof(ModHubViewModel.SummaryText)));
 
-        var summaryPanel = new Border
+        var card = new Border
         {
-            Background = new SolidColorBrush(Color.FromRgb(0x24, 0x2A, 0x33)),
-            BorderThickness = new Thickness(1),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(0x2E, 0x34, 0x3C)),
-            CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(14, 10),
             Margin = new Thickness(0, 0, 0, 10),
-            Child = new StackPanel
-            {
-                Spacing = 4,
-                Children = { summaryHeader, summaryText },
-            },
+            Child = new StackPanel { Spacing = 4, Children = { header, text } },
         };
-        summaryPanel.Bind(Border.IsVisibleProperty, new Binding(nameof(ModHubViewModel.SummaryVisible)));
-
-        Content = new DockPanel
-        {
-            Margin = new Thickness(20),
-            Children =
-            {
-                Make(toolbar, DockPanel.DockProperty, Dock.Top),
-                Make(hint, DockPanel.DockProperty, Dock.Top),
-                Make(summaryPanel, DockPanel.DockProperty, Dock.Top),
-                Make(status, DockPanel.DockProperty, Dock.Bottom),
-                list,
-            },
-        };
+        card.Classes.Add("card");
+        card.Bind(Border.IsVisibleProperty, new Binding(nameof(ModHubViewModel.SummaryVisible)));
+        return card;
     }
 
-    private static Control Make(Control c, AvaloniaProperty property, object value)
+    private static Control BuildStatus()
     {
-        c.SetValue(property, value);
+        var status = new TextBlock { Margin = new Thickness(0, 10, 0, 0) };
+        status.Classes.Add("muted");
+        status.Bind(TextBlock.TextProperty, new Binding(nameof(ModHubViewModel.Status)));
+        return status;
+    }
+
+    private static Control BuildList()
+    {
+        var list = new ListBox
+        {
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(0),
+        };
+        list.Bind(ListBox.ItemsSourceProperty, new Binding(nameof(ModHubViewModel.Rows)));
+        list.Bind(ListBox.SelectedItemProperty, new Binding(nameof(ModHubViewModel.Selected))
+        { Mode = BindingMode.TwoWay });
+        list.ItemTemplate = new FuncDataTemplate<CatalogRow>((row, _) => row is null ? null : BuildRowTemplate(), supportsRecycling: true);
+        return list;
+    }
+
+    private static Control BuildRowTemplate()
+    {
+        // Cover-Frame links (140x90) — LS-ModManager-Format.
+        var coverFrame = new Border
+        {
+            Width = 140, Height = 90,
+            CornerRadius = new CornerRadius(6),
+            ClipToBounds = true,
+            [!Border.BackgroundProperty] = new DynamicResourceExtension("KrosteSurfaceBrush"),
+        };
+        var coverPanel = new Panel();
+        var coverFallback = new TextBlock
+        {
+            Text = "🌐",
+            FontSize = 30,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        coverFallback.Classes.Add("muted");
+        coverPanel.Children.Add(coverFallback);
+
+        var coverImage = new Image { Stretch = Stretch.UniformToFill };
+        coverImage.Bind(Image.SourceProperty, new Binding(nameof(CatalogRow.Cover)));
+        coverPanel.Children.Add(coverImage);
+        coverFrame.Child = coverPanel;
+
+        // Titel + Badges
+        var titleRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var title = new TextBlock
+        {
+            FontWeight = FontWeight.SemiBold,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        title.Bind(TextBlock.TextProperty, new Binding(nameof(CatalogRow.Title)));
+        titleRow.Children.Add(title);
+        titleRow.Children.Add(MakeBadge(new Binding(nameof(CatalogRow.SourceLabel)),
+            "KrosteAccentSoftBrush", "KrosteSecondaryTextBrush", null));
+        titleRow.Children.Add(MakeBadge(new Binding { Source = "NEU" },
+            "KrosteGoldBrush", null, new Binding(nameof(CatalogRow.IsNew))));
+
+        // Author · Category
+        var meta = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 2, 0, 0) };
+        var author = new TextBlock();
+        author.Classes.Add("muted");
+        author.Bind(TextBlock.TextProperty, new Binding(nameof(CatalogRow.Author)));
+        var sep = new TextBlock { Text = "·" };
+        sep.Classes.Add("muted");
+        var category = new TextBlock();
+        category.Classes.Add("muted");
+        category.Bind(TextBlock.TextProperty, new Binding(nameof(CatalogRow.Category)));
+        meta.Children.Add(author);
+        meta.Children.Add(sep);
+        meta.Children.Add(category);
+
+        var textStack = new StackPanel
+        {
+            Spacing = 4,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(14, 0, 0, 0),
+            Children = { titleRow, meta },
+        };
+
+        // Aktions-Buttons rechts
+        var actions = new StackPanel
+        {
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center,
+            Orientation = Orientation.Vertical,
+        };
+        var downloadBtn = new Button { Content = "⬇  Herunterladen" };
+        downloadBtn.Classes.Add("accent");
+        downloadBtn.Bind(Button.CommandProperty, new Binding
+        {
+            RelativeSource = new RelativeSource { Mode = RelativeSourceMode.FindAncestor, AncestorType = typeof(ListBox) },
+            Path = "DataContext." + nameof(ModHubViewModel.DownloadFromRowCommand),
+        });
+        downloadBtn.CommandParameter = null;
+        downloadBtn.Bind(Button.CommandParameterProperty, new Binding("."));
+        downloadBtn.Bind(Button.IsVisibleProperty, new Binding(nameof(CatalogRow.CanInAppDownload)));
+
+        var browserBtn = new Button { Content = "🌐  Im Browser" };
+        browserBtn.Classes.Add("accent");
+        browserBtn.Bind(Button.CommandProperty, new Binding
+        {
+            RelativeSource = new RelativeSource { Mode = RelativeSourceMode.FindAncestor, AncestorType = typeof(ListBox) },
+            Path = "DataContext." + nameof(ModHubViewModel.OpenRowInBrowserCommand),
+        });
+        browserBtn.Bind(Button.CommandParameterProperty, new Binding("."));
+        browserBtn.Bind(Button.IsVisibleProperty, new Binding(nameof(CatalogRow.NeedsBrowser)));
+
+        var detailsBtn = new Button { Content = "👁  Details" };
+        detailsBtn.Classes.Add("ghost");
+        detailsBtn.Bind(Button.CommandProperty, new Binding
+        {
+            RelativeSource = new RelativeSource { Mode = RelativeSourceMode.FindAncestor, AncestorType = typeof(ListBox) },
+            Path = "DataContext." + nameof(ModHubViewModel.ShowDetailForRowCommand),
+        });
+        detailsBtn.Bind(Button.CommandParameterProperty, new Binding("."));
+        detailsBtn.Bind(Button.IsVisibleProperty, new Binding(nameof(CatalogRow.CanInAppDownload)));
+
+        actions.Children.Add(downloadBtn);
+        actions.Children.Add(browserBtn);
+        actions.Children.Add(detailsBtn);
+
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
+        Grid.SetColumn(coverFrame, 0);
+        Grid.SetColumn(textStack, 1);
+        Grid.SetColumn(actions, 2);
+        grid.Children.Add(coverFrame);
+        grid.Children.Add(textStack);
+        grid.Children.Add(actions);
+
+        var card = new Border { Margin = new Thickness(0, 0, 0, 8), Child = grid };
+        card.Classes.Add("card");
+        return card;
+    }
+
+    private static Border MakeBadge(Binding textBinding, string bgResourceKey,
+        string? fgResourceKey, Binding? visibleBinding)
+    {
+        var border = new Border
+        {
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(8, 1),
+            VerticalAlignment = VerticalAlignment.Center,
+            [!Border.BackgroundProperty] = new DynamicResourceExtension(bgResourceKey),
+        };
+        var tb = new TextBlock
+        {
+            FontSize = 10,
+            FontWeight = FontWeight.SemiBold,
+        };
+        if (fgResourceKey is not null)
+            tb[!TextBlock.ForegroundProperty] = new DynamicResourceExtension(fgResourceKey);
+        else
+            tb.Foreground = Brushes.Black;
+        tb.Bind(TextBlock.TextProperty, textBinding);
+        border.Child = tb;
+        if (visibleBinding is not null) border.Bind(Border.IsVisibleProperty, visibleBinding);
+        return border;
+    }
+
+    private static Control WithDock(Control c, Dock dock)
+    {
+        DockPanel.SetDock(c, dock);
         return c;
-    }
-
-    private sealed class JoinConverter : IMultiValueConverter
-    {
-        public object? Convert(System.Collections.Generic.IList<object?> values,
-            System.Type targetType, object? parameter, System.Globalization.CultureInfo culture)
-        {
-            var parts = new System.Collections.Generic.List<string>();
-            if (values.Count > 0 && values[0] is string a && !string.IsNullOrWhiteSpace(a)) parts.Add(a);
-            if (values.Count > 1 && values[1] is string b && !string.IsNullOrWhiteSpace(b)) parts.Add(b);
-            if (values.Count > 2 && values[2] is string c && !string.IsNullOrWhiteSpace(c)) parts.Add("v" + c);
-            if (values.Count > 3 && values[3] is string d && !string.IsNullOrWhiteSpace(d)) parts.Add(d);
-            return string.Join("  ·  ", parts);
-        }
     }
 }

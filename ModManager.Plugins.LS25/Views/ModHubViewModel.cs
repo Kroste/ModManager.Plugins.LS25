@@ -381,6 +381,33 @@ public sealed partial class ModHubViewModel : ObservableObject
         }
     }
 
+    /// <summary>Direkt-Download für eine Row aus dem Row-Button (nicht per
+    /// Selected). Der User klickt auf Herunterladen — die Row wird automatisch
+    /// selektiert und der Download läuft. Vermeidet den "erst selektieren,
+    /// dann Toolbar-Button klicken"-Zweischritt.</summary>
+    [RelayCommand]
+    private async Task DownloadFromRowAsync(CatalogRow? row)
+    {
+        if (row is null || !row.Source.CanInAppDownload) return;
+        Selected = row;
+        await DownloadSelectedAsync();
+    }
+
+    [RelayCommand]
+    private void OpenRowInBrowser(CatalogRow? row)
+    {
+        if (row is null) return;
+        _host.Shell.OpenExternalUrl(row.Source.DetailUrl);
+    }
+
+    [RelayCommand]
+    private void ShowDetailForRow(CatalogRow? row)
+    {
+        if (row is null) return;
+        Selected = row;
+        ShowDetail();
+    }
+
     /// <summary>Extrahiert die mod_id aus einer GIANTS-Detail-URL. Robust gegen
     /// URL-Varianten: <c>?mod_id=12345</c> (Standard) und <c>/12345/</c> (Legacy).</summary>
     internal static int? ExtractModId(string url)
